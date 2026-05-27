@@ -1,0 +1,8 @@
+numpy>=1.24.0
+scipy>=1.10.0
+transformers>=4.30.0,<5
+cmake>=3.27
+onnx>=1.14
+huggingface_hub>=0.20
+safetensors>=0.4
+sentencepiece>=0.2

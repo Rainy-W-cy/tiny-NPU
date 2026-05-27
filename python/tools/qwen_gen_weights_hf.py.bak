@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Generate tiny-Qwen weights.bin from HuggingFace Qwen2-0.5B weights.
+"""Generate LLaMA weights.bin + golden tokens from HuggingFace Qwen2-0.5B weights.
 
 Downloads Qwen/Qwen2-0.5B (494M params, Qwen2 architecture with GQA + QKV bias),
 slices each weight tensor to our tiny NPU dimensions, quantizes to int8,
-and packs the result into weights.bin.
-
-Golden inference is intentionally handled by python/golden/qwen_infer_golden.py
-so text prompt processing and numeric golden generation stay in the infer layer,
-matching the GPT-style flow.
+runs golden inference, and outputs the same files as llama_gen_weights.py.
 
 Qwen2 differences from LLaMA/Mistral:
   - QKV bias: q_proj.bias, k_proj.bias, v_proj.bias (packed at BLK_BQ/BK/BV)
@@ -15,6 +11,9 @@ Qwen2 differences from LLaMA/Mistral:
 
 Outputs:
   weights.bin        - packed int8 weights (181312 bytes)
+  prompt_tokens.txt  - initial prompt token IDs
+  golden_tokens.txt  - greedy-generated token IDs
+  golden_logits.bin  - int8 logits at each step [N_GEN, VOCAB_SIZE]
 
 Dependencies: huggingface_hub, safetensors, numpy, torch
 """
@@ -24,14 +23,18 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from llama_map import (
     HIDDEN, N_Q_HEADS, N_KV_HEADS, HEAD_DIM, FFN_DIM, N_LAYERS,
-    VOCAB_SIZE,
+    VOCAB_SIZE, MAX_SEQ,
     WTE_OFFSET, BLOCKS_OFFSET, LLAMA_BLOCK_SIZE,
     BLK_RMS1_GAMMA, BLK_WQ, BLK_WK, BLK_WV, BLK_WO,
     BLK_RMS2_GAMMA, BLK_W_GATE, BLK_W_UP, BLK_W_DOWN,
     BLK_BQ, BLK_BK, BLK_BV,
     LN_F_OFFSET, LM_HEAD_OFFSET, WEIGHTS_TOTAL,
     quantize_tensor, quantize_gamma,
+    GEMM_SCALE, GEMM_SHIFT, GEMM_SHIFT_K16, GEMM_SHIFT_K128,
 )
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from golden.llama_infer_golden import TinyLLaMAGolden
 
 # ── Qwen2-0.5B source dimensions ────────────────────────────────────
 HF_REPO       = "Qwen/Qwen2-0.5B"
@@ -195,14 +198,21 @@ def extract_weights(tensors):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate tiny-Qwen weights.bin from HuggingFace Qwen2-0.5B")
+        description="Generate LLaMA demo weights from HuggingFace Qwen2-0.5B")
     ap.add_argument("--outdir", default=".", help="Output directory")
+    ap.add_argument("--prompt", default="1,2,3,4",
+                    help="Comma-separated prompt tokens")
+    ap.add_argument("--gen-tokens", type=int, default=4,
+                    help="Number of tokens to generate")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
+    prompt = [int(t) for t in args.prompt.split(",")]
+    n_gen = args.gen_tokens
 
     print(f"Config: HIDDEN={HIDDEN} N_Q_HEADS={N_Q_HEADS} N_KV_HEADS={N_KV_HEADS}")
     print(f"        FFN_DIM={FFN_DIM} N_LAYERS={N_LAYERS} VOCAB={VOCAB_SIZE}")
+    print(f"        prompt={prompt} gen_tokens={n_gen}")
     print(f"Source: {HF_REPO} (hidden={HF_HIDDEN}, heads={HF_N_HEADS}, "
           f"kv_heads={HF_N_KV_HEADS}, ffn={HF_FFN_DIM})")
 
@@ -250,12 +260,53 @@ def main():
     with open(weights_path, "wb") as f:
         f.write(buf)
     print(f"Wrote {len(buf)} bytes -> {weights_path}")
-    print("\nNext step:")
-    print(
-        "  python python/golden/qwen_infer_golden.py "
-        f"--outdir {args.outdir} --prompt \"Hello\" --max-tokens 10"
+
+    # ── Run golden inference ─────────────────────────────────────────
+    model = TinyLLaMAGolden(
+        hidden=HIDDEN, n_q_heads=N_Q_HEADS, n_kv_heads=N_KV_HEADS,
+        head_dim=HEAD_DIM, ffn_dim=FFN_DIM, max_seq=MAX_SEQ,
+        scale=GEMM_SCALE, shift_k64=GEMM_SHIFT, shift_k16=GEMM_SHIFT_K16,
+        shift_k128=GEMM_SHIFT_K128,
     )
-    print("  ./llama_demo_infer --datadir", args.outdir)
+
+    tokens = list(prompt)
+    generated = []
+    all_logits = []
+
+    for step in range(n_gen):
+        logits = model.forward(
+            np.array(tokens, dtype=np.int32),
+            wte, blocks_weights, ln_f_gamma, lm_head_w,
+        )
+        logits_flat = logits[0]
+        all_logits.append(logits_flat.copy())
+
+        next_tok = int(np.argmax(logits_flat))
+        generated.append(next_tok)
+        tokens.append(next_tok)
+
+        print(f"  Step {step}: token={next_tok}  logits[0:8]={logits_flat[:8].tolist()}")
+
+    # ── Write outputs ────────────────────────────────────────────────
+    prompt_path = os.path.join(args.outdir, "prompt_tokens.txt")
+    with open(prompt_path, "w") as f:
+        for t in prompt:
+            f.write(f"{t}\n")
+    print(f"Prompt tokens -> {prompt_path}")
+
+    golden_path = os.path.join(args.outdir, "golden_tokens.txt")
+    with open(golden_path, "w") as f:
+        for t in generated:
+            f.write(f"{t}\n")
+    print(f"Golden tokens ({len(generated)}): {generated} -> {golden_path}")
+
+    logits_path = os.path.join(args.outdir, "golden_logits.bin")
+    logits_arr = np.array(all_logits, dtype=np.int8)
+    with open(logits_path, "wb") as f:
+        f.write(logits_arr.tobytes())
+    print(f"Golden logits [{logits_arr.shape}] -> {logits_path}")
+
+    print("\nDone. Run: ./llama_demo_infer --datadir", args.outdir)
 
 
 if __name__ == "__main__":

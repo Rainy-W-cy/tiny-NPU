@@ -652,7 +652,7 @@ int gen_block_microcode(int S, int ucode_addr) {
         ucode_write(addr++, hi, lo);
     }
 
-    // GEMM WO_out = ATTN * Wo
+    // GEMM WO_out = ATTN * Wo;liner
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_WO_OUT, ADDR_ATTN, ADDR_WO,
                  S, HIDDEN, HIDDEN, GEMM_IMM_K64, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -692,6 +692,7 @@ int gen_block_microcode(int S, int ucode_addr) {
     encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
 
+    //MLP -----
     // GEMM FFN1 = LN2_out * W1
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN1, ADDR_LN2_OUT, ADDR_W1,
                  S, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);

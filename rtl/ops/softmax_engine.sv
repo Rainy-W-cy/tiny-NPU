@@ -95,6 +95,7 @@ module softmax_engine (
     logic [15:0] r_sum_val_fp16;    // FP16 sum for pass 2
     logic [15:0] r_recip_val_fp16;  // FP16 reciprocal for pass 3
     logic [7:0]  lo_byte;           // Low byte staging for 2-byte SRAM reads
+    logic [15:0] fp16_assembled;    // Combinational FP16 value from SRAM bytes
     logic [15:0] fp16_rd_val;       // Assembled FP16 value from 2 reads
 
     // ----------------------------------------------------------------
@@ -501,7 +502,6 @@ module softmax_engine (
     // i.e. when state == S_P1_FEED or S_P2_EXP respectively.
     // This combinational signal is used immediately for exp LUT addressing (pass 2)
     // and max comparison (pass 1).
-    logic [15:0] fp16_assembled;
     always_comb begin
         fp16_assembled = {sram_rd_data, lo_byte};
     end

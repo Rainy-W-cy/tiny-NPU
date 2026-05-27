@@ -63,6 +63,7 @@ set(VERILATOR_COMMON_ARGS
     --trace
     --trace-structs
     -Wall
+    -Wno-fatal
     -Wno-UNUSED
     -Wno-UNDRIVEN
     -Wno-PINCONNECTEMPTY

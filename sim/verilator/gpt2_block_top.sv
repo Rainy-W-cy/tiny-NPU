@@ -309,14 +309,29 @@ module gpt2_block_top
     logic [15:0] gm_rd_addr, gm_wr_addr;
     logic [7:0]  gm_wr_data;
     logic        gm_sa_clear, gm_sa_en;
+    logic        gm_dtype_fp16;
     logic signed [7:0]  gm_sa_a_col [16];
     logic signed [7:0]  gm_sa_b_row [16];
+    logic signed [15:0] gm_sa_a_col_fp16 [16];
+    logic signed [15:0] gm_sa_b_row_fp16 [16];
     logic signed [31:0] gm_sa_acc   [16][16];
 
     // ACC SRAM interface signals
     logic        gm_acc_rd_en, gm_acc_wr_en;
     logic [7:0]  gm_acc_rd_addr, gm_acc_wr_addr;
     logic signed [31:0] gm_acc_rd_data, gm_acc_wr_data;
+
+    // Forward declarations keep VCS happy when later mux sections define
+    // these nets after the early GEMM/DMA wrapper logic references them.
+    logic                    s0_a_en;
+    logic [SRAM0_AW-1:0]    s0_a_addr;
+    logic [7:0]              s0_a_dout;
+    logic        kv_busy, kv_done;
+    logic        kv_rd_en;
+    logic [15:0] kv_rd_addr;
+    logic        kv_wr_en;
+    logic [15:0] kv_wr_addr;
+    logic [7:0]  kv_wr_data;
 
     gemm_ctrl #(
         .ARRAY_M     (16),
@@ -336,6 +351,7 @@ module gpt2_block_top
         .cmd_K        (gemm_cmd_k_dec),
         .cmd_flags    (gemm_cmd_flags_dec),
         .cmd_imm      (decoded_instr.imm),
+        .cmd_dtype    (1'b0),
         .sram_rd_en   (gm_rd_en),
         .sram_rd_addr (gm_rd_addr),
         .sram_rd_data (s0_a_dout),
@@ -353,6 +369,9 @@ module gpt2_block_top
         .sa_a_col     (gm_sa_a_col),
         .sa_b_row     (gm_sa_b_row),
         .sa_acc       (gm_sa_acc),
+        .dtype_fp16   (gm_dtype_fp16),
+        .sa_a_col_fp16(gm_sa_a_col_fp16),
+        .sa_b_row_fp16(gm_sa_b_row_fp16),
         .busy         (gm_busy),
         .done         (gm_done)
     );
@@ -367,8 +386,11 @@ module gpt2_block_top
         .rst_n     (rst_n),
         .clear_acc (gm_sa_clear),
         .en        (gm_sa_en),
+        .dtype_fp16(gm_dtype_fp16),
         .a_col     (gm_sa_a_col),
         .b_row     (gm_sa_b_row),
+        .a_col_fp16(gm_sa_a_col_fp16),
+        .b_row_fp16(gm_sa_b_row_fp16),
         .acc_out   (gm_sa_acc),
         .acc_valid ()
     );
@@ -502,13 +524,6 @@ module gpt2_block_top
     localparam int KV_HEAD_DIM   = 16;
     localparam int KV_VEC_W      = KV_HEAD_DIM * 8;
 
-    logic        kv_busy, kv_done;
-    logic        kv_rd_en;
-    logic [15:0] kv_rd_addr;
-    logic        kv_wr_en;
-    logic [15:0] kv_wr_addr;
-    logic [7:0]  kv_wr_data;
-
     // KV cache bank connections
     logic                                  kv_append_valid, kv_append_ready, kv_append_done;
     logic [$clog2(KV_MAX_LAYERS)-1:0]      kv_append_layer;
@@ -603,9 +618,6 @@ module gpt2_block_top
     // DATA SRAM0 (8-bit x SRAM0_DEPTH) - main data and weights
     // Port A: engine/TB reads, Port B: engine/TB writes
     // ================================================================
-    logic                    s0_a_en;
-    logic [SRAM0_AW-1:0]    s0_a_addr;
-    logic [7:0]              s0_a_dout;
     logic                    s0_b_en, s0_b_we;
     logic [SRAM0_AW-1:0]    s0_b_addr;
     logic [7:0]              s0_b_din;
@@ -768,6 +780,7 @@ module gpt2_block_top
         .scale_factor    (decoded_instr.imm),
         .causal_mask_en  (softmax_cmd_flags_dec[FLAG_CAUSAL_MASK]),
         .causal_limit    (decoded_instr.K),
+        .cmd_dtype       (2'd0),
         .sram_rd_en      (sm_rd_en),
         .sram_rd_addr    (sm_rd_addr),
         .sram_rd_data    (sm_rd_data),
@@ -797,6 +810,7 @@ module gpt2_block_top
         .dst_base        (layernorm_cmd_dst_dec),
         .gamma_base      (16'd0),
         .beta_base       (decoded_instr.src1_base),
+        .cmd_dtype       (2'd0),
         .sram_rd0_en     (ln_rd0_en),
         .sram_rd0_addr   (ln_rd0_addr),
         .sram_rd0_data   (ln_rd0_data),

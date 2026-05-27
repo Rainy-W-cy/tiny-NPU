@@ -44,6 +44,13 @@ module kv_cache_bank
     localparam int ADDR_W = $clog2(TOTAL_ENTRIES);
     localparam int VEC_W = HEAD_DIM * DW;
 
+    logic                 rd_en;
+    logic [ADDR_W-1:0]    rd_addr;
+    logic [VEC_W-1:0]     rd_dout;
+    logic                 wr_en;
+    logic [ADDR_W-1:0]    wr_addr;
+    logic [VEC_W-1:0]     wr_din;
+
     // SRAM storage
     sram_dp #(
         .DEPTH (TOTAL_ENTRIES),
@@ -62,12 +69,6 @@ module kv_cache_bank
         .dout_b ()
     );
 
-    logic                 rd_en;
-    logic [ADDR_W-1:0]    rd_addr;
-    logic [VEC_W-1:0]     rd_dout;
-    logic                 wr_en;
-    logic [ADDR_W-1:0]    wr_addr;
-    logic [VEC_W-1:0]     wr_din;
 
     // Address calculation
     function automatic logic [ADDR_W-1:0] calc_addr(

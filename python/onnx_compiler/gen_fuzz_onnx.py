@@ -5,10 +5,8 @@ Each model is a chain of element-wise / shape-preserving operations to
 avoid shape mismatches. Input and output share the same shape.
 
 Supported ops for fuzzing:
-  - Relu, Exp, Abs, Neg, Sigmoid (element-wise unary, shape-preserving)
-  - Add (binary with constant, shape-preserving)
+  - Relu, Exp, Log, Sqrt (element-wise unary, shape-preserving)
   - Clip (as ReLU6: min=0, max=6)
-  - Binary element-wise: Add, Sub, Mul with random constant (20% chance)
   - Pad + MaxPool block (10% chance, only for NCHW shapes with H,W >= 4)
 
 Each case has 5-15 random nodes chained together.
@@ -27,10 +25,6 @@ except ImportError:
 
 # Element-wise unary ops that preserve shape (only ops supported by compiler)
 UNARY_OPS = ['Relu', 'Exp', 'Log', 'Sqrt']
-
-# Binary element-wise ops (used with a random constant initializer)
-BINARY_OPS = ['Add', 'Sub', 'Mul']
-
 
 def _is_nchw(shape):
     """Check if shape is [1, C, H, W] with H >= 4 and W >= 4."""
@@ -88,7 +82,6 @@ def make_fuzz_model(rng, case_id):
 
         # Determine what kind of op to generate
         # 10% chance: Pad + MaxPool block (only if NCHW with H,W >= 4)
-        # 20% chance: binary element-wise with constant
         # remaining: unary (including Clip as ReLU6 alternative)
 
         if roll < 0.10 and _is_nchw(current_shape) and current_shape[2] >= 4 and current_shape[3] >= 4:
@@ -132,38 +125,6 @@ def make_fuzz_model(rng, case_id):
                 current_shape = new_shape
                 continue
             # If shape too small after pool, fall through to unary
-
-        elif roll < 0.30:
-            # --- Binary element-wise op with random constant ---
-            bin_op = BINARY_OPS[rng.randint(0, len(BINARY_OPS))]
-
-            # Generate a safe constant (small values to avoid overflow)
-            if bin_op == 'Mul':
-                const_val = rng.uniform(0.5, 2.0)
-            elif bin_op == 'Sub':
-                const_val = rng.uniform(-1.0, 1.0)
-            else:  # Add
-                const_val = rng.uniform(-1.0, 1.0)
-
-            const_name = f'const_{init_counter}'
-            init_counter += 1
-
-            # Broadcast-compatible scalar constant
-            const_tensor = numpy_helper.from_array(
-                np.array(const_val, dtype=np.float32).reshape([1]),
-                name=const_name
-            )
-            initializers.append(const_tensor)
-
-            out_name = f'node_{i}_out'
-            bin_node = helper.make_node(
-                bin_op,
-                inputs=[prev_output, const_name],
-                outputs=[out_name]
-            )
-            nodes.append(bin_node)
-            prev_output = out_name
-            continue
 
         # --- Unary op (including Clip as ReLU6 alternative) ---
         # 20% chance of Clip(0,6) instead of a regular unary op
@@ -248,7 +209,7 @@ def main():
     print(f"Saved {num_cases} fuzz models to {out_dir}")
     print(f"  Cases:      case_0.onnx .. case_{num_cases - 1}.onnx")
     print(f"  Ops/model:  5-15 random nodes")
-    print(f"  Op types:   {UNARY_OPS + ['Clip'] + BINARY_OPS + ['Pad+MaxPool']}")
+    print(f"  Op types:   {UNARY_OPS + ['Clip', 'Pad+MaxPool']}")
 
 
 if __name__ == '__main__':

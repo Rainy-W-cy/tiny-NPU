@@ -347,6 +347,7 @@ module engine_tb_top
         .scale_factor    (softmax_scale),
         .causal_mask_en  (softmax_causal_en),
         .causal_limit    (softmax_causal_limit),
+        .cmd_dtype       (2'd0),
         .sram_rd_en      (sm_rd_en),
         .sram_rd_addr    (sm_rd_addr),
         .sram_rd_data    (sm_rd_data),
@@ -376,6 +377,7 @@ module engine_tb_top
         .dst_base      (layernorm_dst_base),
         .gamma_base    (layernorm_gamma_base),
         .beta_base     (layernorm_beta_base),
+        .cmd_dtype     (2'd0),
         .sram_rd0_en   (ln_rd0_en),
         .sram_rd0_addr (ln_rd0_addr),
         .sram_rd0_data (ln_rd0_data),
@@ -426,6 +428,8 @@ module engine_tb_top
     // ================================================================
     logic signed [7:0]  sa_a_col_arr [16];
     logic signed [7:0]  sa_b_row_arr [16];
+    logic signed [15:0] sa_a_col_fp16_arr [16];
+    logic signed [15:0] sa_b_row_fp16_arr [16];
     logic signed [31:0] sa_acc_arr   [16][16];
     logic               sa_acc_valid_i;
 
@@ -435,6 +439,8 @@ module engine_tb_top
         for (gi = 0; gi < 16; gi++) begin : gen_unpack
             assign sa_a_col_arr[gi] = sa_a_col_flat[gi*8 +: 8];
             assign sa_b_row_arr[gi] = sa_b_row_flat[gi*8 +: 8];
+            assign sa_a_col_fp16_arr[gi] = '0;
+            assign sa_b_row_fp16_arr[gi] = '0;
         end
     endgenerate
 
@@ -448,8 +454,11 @@ module engine_tb_top
         .rst_n     (rst_n),
         .clear_acc (sa_clear_acc),
         .en        (sa_en),
+        .dtype_fp16(1'b0),
         .a_col     (sa_a_col_arr),
         .b_row     (sa_b_row_arr),
+        .a_col_fp16(sa_a_col_fp16_arr),
+        .b_row_fp16(sa_b_row_fp16_arr),
         .acc_out   (sa_acc_arr),
         .acc_valid (sa_acc_valid_i)
     );

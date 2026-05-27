@@ -443,6 +443,7 @@ module integration_top
         .scale_factor    (decoded_instr.imm),
         .causal_mask_en  (softmax_cmd_flags_dec[FLAG_CAUSAL_MASK]),
         .causal_limit    (decoded_instr.K),
+        .cmd_dtype       (2'd0),
         .sram_rd_en      (sm_rd_en),
         .sram_rd_addr    (sm_rd_addr),
         .sram_rd_data    (sm_rd_data),

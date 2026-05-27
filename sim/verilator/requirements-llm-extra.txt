@@ -1,0 +1,7 @@
+# Install this separately when you need HuggingFace weight export or full LLM demos.
+# Example:
+#   .venv/bin/python -m pip install --trusted-host download.pytorch.org \
+#       --index-url https://download.pytorch.org/whl/cpu \
+#       -r sim/verilator/requirements-llm-extra.txt
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
