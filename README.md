@@ -443,28 +443,41 @@ sim/verilator/build/llama_demo_infer --datadir sim/verilator/build/mistral_data_
 ```
 ### Qwen
 ```bash
-#Activate env
-source /home/yian/codex-workspace/tiny-NPU/sim/verilator/setup_env.sh
+# Activate env
+source sim/verilator/setup_env.sh
 
-#generate infer execute file
-make cmake_sim
+# Build verilator env and build Qwen target
+./.venv/bin/cmake -S sim/verilator -B sim/verilator/build
+./.venv/bin/cmake --build sim/verilator/build --target qwen_demo_infer -j1
 
-#from hugging face dump weights and quant and pack
+# Export, quantize and pack Qwen weights
+./.venv/bin/python python/tools/qwen_gen_weights_hf.py   --outdir sim/verilator/build/qwen_data_hf
 
-python python/tools/qwen_gen_weights_hf.py --outdir sim/verilator/build/qwen_data_hf
+# Generate prompt / golden / text outputs
+./.venv/bin/python python/golden/qwen_infer_golden.py   --prompt "Hello"   --max-tokens 10   --temperature 0.0   --seed 42   --outdir sim/verilator/build/qwen_data_hf
 
-#generate golden text and prompt for Testbench with tokenizer
+# Run full-recompute path
+sim/verilator/build/qwen_demo_infer   --datadir sim/verilator/build/qwen_data_hf   --max-tokens 10
 
-#kernel used llama_infer_golden,adding front and post process for prompt such as "Hello"
-python python/golden/qwen_infer_golden.py \
-  --prompt "Hello" --max-tokens 10 --temperature 0.0 --seed 42 \
-  --outdir sim/verilator/build/qwen_data_hf
+# Run prefill + decode (KV-cache) path
+sim/verilator/build/qwen_demo_infer   --datadir sim/verilator/build/qwen_data_hf   --max-tokens 10   --kv-cache 2>&1 | tee sim/verilator/build/qwen_data_hf/qwen_hardware.log
 
-#running sim
-sim/verilator/build/llama_demo_infer --datadir sim/verilator/build/qwen_data_hf --max-tokens 10
-#Total time use this shell
-time sim/verilator/build/llama_demo_infer --datadir sim/verilator/build/qwen_data_hf --max-tokens 10
+# One-shot shell entry
+sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 --skip-python #no python
+sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 
+sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 --kv-cache
 ```
+
+Qwen 当前已经具备两条 C++ 仿真路径：
+
+- `full-recompute`
+- `prefill + decode (--kv-cache)`
+
+其中：
+
+- `python/tools/qwen_gen_weights_hf.py` 只负责权重导出、裁剪、量化和打包
+- `python/golden/qwen_infer_golden.py` 负责文本前处理、golden 推理和输出工件
+- `sim/verilator/tb_qwen_demo_infer.cpp` 是 Qwen 独立 C++ 仿真入口
 
 ## ONNX Graph Mode
 

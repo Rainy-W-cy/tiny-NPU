@@ -6,6 +6,12 @@
 #                      [--max-tokens 10] [--temperature 0.0] [--seed 42]
 #                      [--skip-python]
 # =============================================================================
+# First:set the kinds of needed directorys
+# Second:set parameters for the demo
+# Third:explain parameters 
+# Fourth: Run python script to export weights and run golden inference
+# Fifth: build verilator env(cmakelists.txt) and target file
+# Sixth: Run NPU demo
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +19,7 @@ NPU_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PYTHON_DIR="$NPU_DIR/python"
 BUILD_DIR="$SCRIPT_DIR/build"
 DEMO_OUTDIR="${DEMO_OUTDIR:-$BUILD_DIR/qwen_data_hf}"
+#venv python path
 VENV_PYTHON="$NPU_DIR/.venv/bin/python"
 
 if [ -x "$VENV_PYTHON" ]; then
@@ -20,13 +27,14 @@ if [ -x "$VENV_PYTHON" ]; then
 else
     PYTHON_BIN="python3"
 fi
-
+#parameters
 PROMPT="Hello"
 PROMPT_IDS=""
 MAX_TOKENS=10
 SKIP_PYTHON=0
 TEMPERATURE=0.0
 SEED=42
+KV_CACHE=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -36,10 +44,20 @@ while [[ $# -gt 0 ]]; do
         --max-tokens) MAX_TOKENS="$2"; shift 2;;
         --temperature) TEMPERATURE="$2"; shift 2;;
         --seed) SEED="$2"; shift 2;;
+        --kv-cache) KV_CACHE=1; shift;;
         --skip-python) SKIP_PYTHON=1; shift;;
         *) echo "Unknown option: $1"; exit 1;;
     esac
 done
+
+# 添加日志
+LOG_FILE="${LOG_FILE:-$DEMO_OUTDIR/qwen_run_$(date +%Y%m%d_%H%M%S).log}"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# 终端显示，同时保存标准输出和错误输出
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "Log file: $LOG_FILE"
 
 echo "============================================"
 echo "  tiny-Qwen NPU Inference Demo"
@@ -50,6 +68,7 @@ else
 fi
 echo "  max_tokens: $MAX_TOKENS"
 echo "  temperature: $TEMPERATURE  seed: $SEED"
+echo "  kv_cache: $KV_CACHE"
 echo "  outdir: $DEMO_OUTDIR"
 echo "============================================"
 
@@ -88,19 +107,25 @@ else
     echo "Skipping Python steps (--skip-python)"
 fi
 
-# Step 2: Build llama_demo_infer
+# Step 2: Build qwen_demo_infer
 echo ""
-echo "--- Step 2: Build llama_demo_infer ---"
+echo "--- Step 2: Build qwen_demo_infer ---"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
-cmake .. 2>&1 | tail -3
-cmake --build . --target llama_demo_infer -j"$(nproc)" 2>&1 | tail -5
+#build env ,gen rule
+cmake .. 
+#build target file ,execute rule gen build target file
+cmake --build . --target qwen_demo_infer -j"$(nproc)" 
 echo "Build complete."
 
 # Step 3: Run NPU demo
 echo ""
 echo "--- Step 3: Run NPU inference ---"
-./llama_demo_infer --datadir "$DEMO_OUTDIR" --max-tokens "$MAX_TOKENS"
+RUN_ARGS=(./qwen_demo_infer --datadir "$DEMO_OUTDIR" --max-tokens "$MAX_TOKENS")
+if [ "$KV_CACHE" -eq 1 ]; then
+    RUN_ARGS+=(--kv-cache)
+fi
+"${RUN_ARGS[@]}"
 
 # Step 4: Decode NPU tokens back to text
 echo ""

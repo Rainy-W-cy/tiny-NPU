@@ -28,7 +28,7 @@ module reduce_sum (
     // Saturating accumulation
     logic signed [32:0] wide_sum;
     logic signed [31:0] sat_sum;
-
+    //sat and acc
     always_comb begin
         wide_sum = 33'(acc) + 33'(signed'(din));
         if (wide_sum > 33'sd2147483647)

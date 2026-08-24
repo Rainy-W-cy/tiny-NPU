@@ -203,6 +203,7 @@ module softmax_engine (
 
             // ----- Pass 1: Find max -----
             S_P1_READ: begin
+                //read sram int8 enabled
                 if (is_fp16)
                     state_nxt = S_P1_READ_HI;   // need second byte
                 else
@@ -216,7 +217,7 @@ module softmax_engine (
                     if (is_fp16)
                         state_nxt = S_P2_READ;   // FP16: max tracked inline, skip S_P1_WAIT
                     else
-                        state_nxt = S_P1_WAIT;
+                        state_nxt = S_P1_WAIT;//last data
                 end else begin
                     state_nxt = S_P1_READ;
                 end
@@ -250,8 +251,8 @@ module softmax_engine (
             S_P2_WAIT: if (rsum_valid) state_nxt = S_P3_RECIP;
 
             // ----- Pass 3: normalize -----
-            S_P3_RECIP:      state_nxt = S_P3_RECIP_WAIT;
-            S_P3_RECIP_WAIT: state_nxt = S_P3_READ;
+            S_P3_RECIP:      state_nxt = S_P3_RECIP_WAIT;//input recip_lut
+            S_P3_RECIP_WAIT: state_nxt = S_P3_READ;//next clock output recip
 
             S_P3_READ: begin
                 // Scratch SRAM is 16-bit wide, so no S_P3_READ_HI needed
@@ -316,7 +317,7 @@ module softmax_engine (
             r_idx <= '0;
         // Pass 1 -> next element
         else if (state == S_P1_FEED && state_nxt == S_P1_READ)
-            r_idx <= r_idx + 16'd1;
+            r_idx <= r_idx + 16'd1;//send data to reduce_max plus 1；
         // Pass 1 done -> reset for pass 2
         else if (!is_fp16 && state == S_P1_WAIT && rmax_valid)
             r_idx <= '0;
@@ -483,7 +484,7 @@ module softmax_engine (
     // ----------------------------------------------------------------
     always_ff @(posedge clk) begin
         if (state == S_P3_RECIP_WAIT && !is_fp16)
-            r_recip_val <= recip_data;
+            r_recip_val <= recip_data;//align 
     end
 
     // ----------------------------------------------------------------
@@ -546,7 +547,7 @@ module softmax_engine (
                 if (is_fp16)
                     sram_rd_addr = r_src_base + {r_idx[14:0], 1'b0};       // idx*2 (low byte)
                 else
-                    sram_rd_addr = r_src_base + r_idx;
+                    sram_rd_addr = r_src_base + r_idx;//int8
             end
 
             S_P1_READ_HI: begin
@@ -577,20 +578,20 @@ module softmax_engine (
     // ----------------------------------------------------------------
     // Pass 1: reduce_max control (INT8 only)
     // ----------------------------------------------------------------
-    assign rmax_start     = (state == S_IDLE && cmd_valid && cmd_dtype == 2'd0);
-    assign rmax_din_valid = (!is_fp16 && state == S_P1_FEED);
+    assign rmax_start     = (state == S_IDLE && cmd_valid && cmd_dtype == 2'd0);//reduce_max initial
+    assign rmax_din_valid = (!is_fp16 && state == S_P1_FEED);//pass1 valid, sram one clcye so in S_P1_FEED send to reduce_max
 
     // Apply causal mask: if position > causal_limit, feed -128 (INT8) or -inf (FP16)
     logic signed [7:0] masked_input;
     always_comb begin
         if (r_causal_mask_en && r_idx > r_causal_limit)
-            masked_input = -8'sd128;
+            masked_input = -8'sd128;//causal  mask
         else
             masked_input = signed'(sram_rd_data);
     end
 
-    assign rmax_din      = masked_input;
-    assign rmax_din_last = (!is_fp16 && state == S_P1_FEED) && (r_idx == r_length - 16'd1);
+    assign rmax_din      = masked_input;//reduce_max input data
+    assign rmax_din_last = (!is_fp16 && state == S_P1_FEED) && (r_idx == r_length - 16'd1);//row last element
 
     // ----------------------------------------------------------------
     // FP16 causal-masked input value
@@ -614,7 +615,7 @@ module softmax_engine (
 
     always_comb begin
         // (x - max): both are int8
-        scaled_diff = 16'(signed'(masked_input)) - 16'(signed'(r_max_val));
+        scaled_diff = 16'(signed'(masked_input)) - 16'(signed'(r_max_val));//x - max
         // Clamp to int8 range for exp LUT input
         if (scaled_diff < -16'sd128)
             exp_input = -8'sd128;
@@ -625,7 +626,7 @@ module softmax_engine (
     end
 
     // Drive INT8 exp LUT address during pass 2
-    assign exp_addr = (!is_fp16 && state == S_P2_EXP) ? exp_input : 8'd0;
+    assign exp_addr = (!is_fp16 && state == S_P2_EXP) ? exp_input : 8'd0;//S_P2_EXP state send new request
 
     // FP16 exp LUT: compute diff = x - max, use upper 8 bits as index
     // fp16_diff is computed combinationally for use in S_P2_EXP
@@ -640,16 +641,16 @@ module softmax_engine (
     assign exp_fp16_addr = (is_fp16 && state == S_P2_EXP) ? fp16_diff[15:8] : 8'd0;
 
     // reduce_sum control (INT8 only)
-    assign rsum_start     = (!is_fp16 && state == S_P1_WAIT && rmax_valid);
-    assign rsum_din_valid = (!is_fp16 && state == S_P2_FEED);
-    assign rsum_din       = 16'(signed'(exp_data));  // exp output is unsigned Q8.8, treat as int16
+    assign rsum_start     = (!is_fp16 && state == S_P1_WAIT && rmax_valid);//start reduce sum initial
+    assign rsum_din_valid = (!is_fp16 && state == S_P2_FEED);//consumer new exp_data
+    assign rsum_din       = 16'(signed'(exp_data));  // exp output is unsigned Q8.8, treat as int16;
     assign rsum_din_last  = (!is_fp16 && state == S_P2_FEED) && (r_idx == r_length - 16'd1);
 
     // Write exp values to scratch SRAM during pass 2
     // INT8: write exp_data (16-bit Q8.8)
     // FP16: write exp_fp16_data (16-bit FP16)
     always_comb begin
-        scratch_wr_en   = (state == S_P2_FEED);
+        scratch_wr_en   = (state == S_P2_FEED);//consumer new exp_data
         scratch_wr_addr = r_idx;
         if (is_fp16)
             scratch_wr_data = exp_fp16_data;
@@ -671,7 +672,7 @@ module softmax_engine (
     end
 
     // Read scratch values during pass 3
-    assign scratch_rd_en   = (state == S_P3_READ);
+    assign scratch_rd_en   = (state == S_P3_READ);//
     assign scratch_rd_addr = r_idx;
 
     // ----------------------------------------------------------------
@@ -684,7 +685,7 @@ module softmax_engine (
     logic signed [7:0] norm_result;
 
     always_comb begin
-        norm_product = 32'(scratch_rd_data) * 32'(r_recip_val);
+        norm_product = 32'(scratch_rd_data) * 32'(r_recip_val);//Norm excution
         norm_trunc = norm_product[31:17];  // >>17 for Q8.24 -> Q0.7
         // Clamp to [0, 127] since softmax outputs are non-negative
         if (norm_trunc > 15'd127)
@@ -726,6 +727,7 @@ module softmax_engine (
 
         if (!is_fp16 && state == S_P3_NORM) begin
             // INT8: write single byte
+            // Norm compute and write 
             sram_wr_en   = 1'b1;
             sram_wr_addr = r_dst_base + r_idx;
             sram_wr_data = norm_result;

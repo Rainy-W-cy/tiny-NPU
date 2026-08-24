@@ -59,7 +59,10 @@ from llama_map import (
 
 HF_REPO = "Qwen/Qwen2-0.5B"
 
-
+#它建立一个包含 256 项的字典：1: 某个Unicode字符, 2: 某个Unicode字符, ... 256: 某个Unicode字符
+#这里的 Unicode 字符只是 byte 的词表表示，不是重新解释文本语义，其中部分字符会被重置为 256+n 的 Unicode code point，确保所有 256 个字节都有对应的 Unicode 字符。
+#因为有一些空格 回车等和控制字符在 GPT-2 、Qwen2的 BPE 中没有被使用，所以它们会被映射到 256 以上的 Unicode code point，以确保每个字节都有一个唯一的 Unicode 表示。
+#要明确的一点是，qwen2，gpt2的词汇表也是byte level在前256个token，所以会恰好覆盖utf8这256个
 def bytes_to_unicode():
     """Reproduce GPT-2 style byte-to-unicode mapping used by Qwen BPE."""
     bs = (
@@ -86,9 +89,12 @@ class QwenTinyTextCodec:
         self.repo_id = repo_id
         self.tokenizer = AutoTokenizer.from_pretrained(repo_id)
         self.byte_encoder = bytes_to_unicode()
-        vocab = self.tokenizer.get_vocab()
+        vocab = self.tokenizer.get_vocab()#完整 Qwen 词汇表
 
         self.byte_to_tid = {}
+        #根据byte_val的值查uchar，再通过vocab查tid，建立byte_val到tid的映射
+        #检查256 个 byte 是否都能找到 token ID
+        #并且检查每个 token ID 是否小于 VOCAB_SIZE=256，最终是满足的
         for byte_val, uchar in self.byte_encoder.items():
             tid = vocab.get(uchar)
             if tid is not None and tid < VOCAB_SIZE:
@@ -100,10 +106,11 @@ class QwenTinyTextCodec:
             )
 
         self.tid_to_byte = {tid: byte for byte, tid in self.byte_to_tid.items()}
-
+    #Python 按照 UTF-8 标准，根据每个字符的 Unicode code point 判断需要几个 bytes。
     def encode_text(self, text):
         """Encode UTF-8 text into tiny-Qwen token IDs."""
         prompt_bytes = text.encode("utf-8")
+        #每个byte对应一个token id
         return [self.byte_to_tid[b] for b in prompt_bytes]
 
     def decode_tokens(self, token_ids):
@@ -128,6 +135,7 @@ def parse_prompt_ids(text):
 
 def load_qwen_demo_weights(weights_bin_path):
     """Load quantized tiny-Qwen weights from weights.bin."""
+    #读取weights.bin文件，并拆包
     with open(weights_bin_path, "rb") as f:
         raw = f.read()
     if len(raw) != WEIGHTS_TOTAL:
@@ -136,10 +144,10 @@ def load_qwen_demo_weights(weights_bin_path):
         )
 
     buf = np.frombuffer(raw, dtype=np.int8)
-
+    #恢复原始token embedding后的矩阵,拆包
     wte = buf[WTE_OFFSET : WTE_OFFSET + WTE_SIZE].reshape(VOCAB_SIZE, HIDDEN).copy()
+    #将保存四层权重[0][1][2][3].....，拆包
     blocks_weights = []
-
     for i in range(N_LAYERS):
         base = BLOCKS_OFFSET + i * LLAMA_BLOCK_SIZE
         blocks_weights.append(
@@ -202,7 +210,7 @@ def load_qwen_demo_weights(weights_bin_path):
 
     return wte, blocks_weights, ln_f_gamma, lm_head
 
-
+#自回归循环
 def generate_tokens(
     model,
     prompt_ids,
@@ -215,6 +223,7 @@ def generate_tokens(
     lm_head,
 ):
     """Autoregressive decode loop with greedy or temperature sampling."""
+    #all token;generated token;generated logits
     tokens = list(prompt_ids)
     generated = []
     generated_logits = []
@@ -224,7 +233,7 @@ def generate_tokens(
         if seq_len > MAX_SEQ:
             print(f"Warning: seq_len {seq_len} > MAX_SEQ {MAX_SEQ}, stopping")
             break
-
+        #forward inference,返回logits
         logits = model.forward(
             np.array(tokens, dtype=np.int32),
             wte,
@@ -284,13 +293,14 @@ def main():
     outdir = args.outdir or os.environ.get("DEMO_OUTDIR", ".")
     weights_path = args.weights or os.path.join(outdir, "weights.bin")
     os.makedirs(outdir, exist_ok=True)
-
+    #创建类
     codec = QwenTinyTextCodec(HF_REPO)
     if args.prompt_ids is not None:
         prompt_ids = parse_prompt_ids(args.prompt_ids)
         prompt_text = codec.decode_tokens(prompt_ids)
         prompt_mode = "ids"
     else:
+        #编码utf8->byte->uchar->token_id
         prompt_ids = codec.encode_text(args.prompt)
         prompt_text = args.prompt
         prompt_mode = "text"
@@ -301,8 +311,10 @@ def main():
     print(f"Prompt mode: {prompt_mode}")
     print(f"Prompt text: {prompt_text!r}")
     print(f"Prompt ids: {prompt_ids}")
-
+    #load weights.bin文件，并拆包成wte, blocks_weights, ln_f_gamma, lm_head
     wte, blocks_weights, ln_f_gamma, lm_head = load_qwen_demo_weights(weights_path)
+
+    #gen golden model in llama_infer_golden.py,this is model structure and compute rule
     model = TinyLLaMAGolden(
         hidden=HIDDEN,
         n_q_heads=N_Q_HEADS,
@@ -315,8 +327,9 @@ def main():
         shift_k16=GEMM_SHIFT_K16,
         shift_k128=GEMM_SHIFT_K128,
     )
-
+    #只有 temperature 大于 0 时才创建随机数生成器。seed
     rng = np.random.RandomState(args.seed) if args.temperature > 0 else None
+    #inference,生成token
     all_tokens, gen_tokens, gen_logits = generate_tokens(
         model,
         prompt_ids,
@@ -328,21 +341,23 @@ def main():
         ln_f_gamma,
         lm_head,
     )
-
+    #解码
     decoded = codec.decode_tokens(all_tokens)
     print(f"\nGolden generated text: {decoded!r}")
     print(f"Golden tokens: {all_tokens}")
 
+    #将prompt ids, golden tokens, golden text, golden logits, golden meta写入outdir
+    #prompt_tokens.txt将被tb_qwen_demo_infer.cpp读取，进行硬件驱动
     with open(os.path.join(outdir, "prompt_tokens.txt"), "w") as f:
         f.write(" ".join(str(t) for t in prompt_ids) + "\n")
-
+    #Python新生成部分 id
     with open(os.path.join(outdir, "golden_tokens.txt"), "w") as f:
         for t in gen_tokens:
             f.write(f"{t}\n")
-
+    #prompt文本 + Python生成文本
     with open(os.path.join(outdir, "golden_text.txt"), "w") as f:
         f.write(decoded + "\n")
-
+    #转int8，之后按行写原始int8字节流
     logits_arr = np.array(gen_logits, dtype=np.int8)
     logits_arr.tofile(os.path.join(outdir, "golden_logits.bin"))
 

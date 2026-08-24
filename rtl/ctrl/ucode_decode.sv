@@ -238,7 +238,7 @@ module ucode_decode
         endcase
 
         // Check if the target engine is free
-        engine_free = can_issue[target_engine];
+        engine_free = can_issue[target_engine];//can issue = not busy
     end
 
     // -------------------------------------------------------------------------
@@ -318,7 +318,7 @@ module ucode_decode
                     end else if (target_valid && engine_free) begin
                         // Normal engine command: decode and dispatch
                         instr_ready   = 1'b1;
-                        cmd_valid_d   = 1'b1;
+                        cmd_valid_d   = 1'b1;//dispatch buffer
                         cmd_opcode_d  = dec_opcode;
                         cmd_flags_d   = dec_flags;
                         cmd_dst_d     = dec_dst_base;

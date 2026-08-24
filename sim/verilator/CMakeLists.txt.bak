@@ -57,9 +57,7 @@ set(SV_TOP_EXTRA
     ${RTL_DIR}/gemm/gemm_post.sv
     ${RTL_DIR}/top.sv
 )
-#parameter explain
-#cc:sv->c++ module;trace:gen vcd wave file;wall:open warning;Wno-fatal:warning don't fail sim
-#DSIMULATION:compile ->SIMULATTON;-I:sv find dir
+
 set(VERILATOR_COMMON_ARGS
     --cc
     --trace
@@ -215,23 +213,8 @@ target_link_libraries(kv_cache_sim PRIVATE gpt2_demo_verilated)
 # SHARED LIBRARY: LLaMA (SRAM0=64K, SRAM1=8K) — targets 7, 8
 # Verilated ONCE, linked by llama_block_sim + llama_demo_infer
 # =============================================================================
-
 add_library(llama_verilated STATIC ${CMAKE_CURRENT_BINARY_DIR}/verilator_stub.cpp)
 
-#---------------------------------------------
-#使用 SV_COMMON + SV_CTRL + llama_block_top.sv
-#RTL 顶层是 llama_block_top
-#生成的 C++ 类名前缀是 Vllama_block_top
-#SRAM0 深度覆盖为 65536
-#SRAM1 深度覆盖为 8192
-#---------------------------------------------
-#llama_block_top.sv 及其子模块
-#  -> Verilator
-#  -> Vllama_block_top.h
-#  -> Vllama_block_top.cpp 等生成文件
-#  -> C++ 编译
-#  -> libllama_verilated.a
-#---------------------------------------------
 verilate(llama_verilated
     SOURCES ${SV_COMMON} ${SV_CTRL} ${SIM_DIR}/llama_block_top.sv
     TOP_MODULE llama_block_top
@@ -248,22 +231,6 @@ target_link_libraries(llama_block_sim PRIVATE llama_verilated)
 # ---- Target 8: LLaMA Inference Demo ----
 add_executable(llama_demo_infer tb_llama_demo_infer.cpp)
 target_link_libraries(llama_demo_infer PRIVATE llama_verilated)
-
-#build qwen executable file
-
-# ---- Target 8b: Qwen Inference Demo ----
-#add_executable(Target file name   c++ source file )
-add_executable(qwen_demo_infer tb_qwen_demo_infer.cpp)
-#将 C++ testbench 与 Verilated RTL 静态库链接起来：
-#tb_qwen_demo_infer.cpp
-#            |
-#            v
-#     qwen_demo_infer
-#            ^
-#            |
-#libllama_verilated.a
-#end qwen_demo_infer include:{手写C++ TB;verilator 转换后RTL c++ model;verilator runtime}
-target_link_libraries(qwen_demo_infer PRIVATE llama_verilated)
 
 # =============================================================================
 # SHARED LIBRARY: ONNX Graph Sim (SRAM0=64K) — targets 9-21

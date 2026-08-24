@@ -19,9 +19,9 @@ module kv_cache_bank
     // Append interface (write one vector per cycle)
     input  wire                          append_valid,
     output logic                         append_ready,
-    input  wire  [$clog2(MAX_LAYERS)-1:0] append_layer,
-    input  wire  [$clog2(MAX_HEADS)-1:0]  append_head,
-    input  wire  [$clog2(MAX_SEQ)-1:0]    append_time,
+    input  wire  [$clog2(MAX_LAYERS)-1:0] append_layer,//layer
+    input  wire  [$clog2(MAX_HEADS)-1:0]  append_head,//head
+    input  wire  [$clog2(MAX_SEQ)-1:0]    append_time,//position
     input  wire                          append_is_v,
     input  wire  [HEAD_DIM*DW-1:0]       append_data,
     output logic                         append_done,
@@ -32,7 +32,7 @@ module kv_cache_bank
     input  wire  [$clog2(MAX_LAYERS)-1:0] read_layer,
     input  wire  [$clog2(MAX_HEADS)-1:0]  read_head,
     input  wire  [$clog2(MAX_SEQ)-1:0]    read_time_start,
-    input  wire  [$clog2(MAX_SEQ)-1:0]    read_time_len,
+    input  wire  [$clog2(MAX_SEQ)-1:0]    read_time_len,//读row长度或表述为token数量
     input  wire                          read_is_v,
     output logic                         read_data_valid,
     output logic [HEAD_DIM*DW-1:0]       read_data,
@@ -47,6 +47,7 @@ module kv_cache_bank
     logic                 rd_en;
     logic [ADDR_W-1:0]    rd_addr;
     logic [VEC_W-1:0]     rd_dout;
+
     logic                 wr_en;
     logic [ADDR_W-1:0]    wr_addr;
     logic [VEC_W-1:0]     wr_din;
@@ -78,7 +79,7 @@ module kv_cache_bank
         input logic                          is_v
     );
         logic [ADDR_W-1:0] base;
-        base = {is_v, layer, head, t};
+        base = {is_v, layer, head, t};//addr from every layer+head+position
         return base;
     endfunction
 
@@ -93,8 +94,8 @@ module kv_cache_bank
 
     state_t state, state_next;
 
-    logic [$clog2(MAX_SEQ)-1:0] rd_time_cnt;
-    logic [$clog2(MAX_SEQ)-1:0] rd_time_end;
+    logic [$clog2(MAX_SEQ)-1:0] rd_time_cnt;//读row次数
+    logic [$clog2(MAX_SEQ)-1:0] rd_time_end;//
     logic                        rd_pipe_valid;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -103,7 +104,7 @@ module kv_cache_bank
         else
             state <= state_next;
     end
-
+    //FSM持续吞吐率最多约为每两个周期接受一个 Append。
     always_comb begin
         state_next    = state;
         append_ready  = 1'b0;
@@ -141,6 +142,7 @@ module kv_cache_bank
             end
 
             S_READ_STREAM: begin
+                //对于kv的读写来说是需要完整读会某一layer的某一head的k或v的，所以这里采用与写不同的stream形式
                 if (rd_time_cnt < rd_time_end) begin
                     rd_en   = 1'b1;
                     rd_addr = calc_addr(read_layer, read_head,

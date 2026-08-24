@@ -70,6 +70,7 @@ module scoreboard
     // -------------------------------------------------------------------------
 
     always_comb begin
+        //blocking assignment
         busy_d = busy_q;
 
         // Clear bits for engines that are done

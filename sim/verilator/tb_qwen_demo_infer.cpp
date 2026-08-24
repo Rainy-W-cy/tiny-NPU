@@ -1,7 +1,7 @@
 // =============================================================================
-// tb_llama_demo_infer.cpp - End-to-end LLaMA inference demo on NPU
+// tb_qwen_demo_infer.cpp - End-to-end Qwen inference demo on NPU
 // Loads weights from weights.bin, runs multi-token autoregressive decode
-// using NPU hardware (4 LLaMA blocks + final RMSNorm + lm_head).
+// using NPU hardware (4 Qwen/LLaMA-family blocks + final RMSNorm + lm_head).
 // Compares NPU-generated tokens against Python golden reference.
 // =============================================================================
 
@@ -28,7 +28,8 @@
 #endif
 
 // =============================================================================
-// Global simulation state
+// 全局仿真状态
+// 这里维护 Verilator 仿真时钟、DUT 句柄以及波形句柄。
 // =============================================================================
 vluint64_t main_time = 0;
 double sc_time_stamp() { return main_time; }
@@ -38,7 +39,12 @@ static VerilatedVcdC*    tfp;
 static int               tc = 0;
 
 // =============================================================================
-// Model configuration (must match llama_map.py)
+// 模型静态配置（必须与 python/tools/llama_map.py 保持一致）
+// 这些参数同时决定：
+// 1. weights.bin 的布局；
+// 2. SRAM 地址规划；
+// 3. 微码里的矩阵尺寸；
+// 4. C++ golden 与 RTL 的共同配置。
 // =============================================================================
 static const int HIDDEN     = 64;
 static const int HEAD_DIM   = 16;
@@ -51,7 +57,8 @@ static const int VOCAB_SIZE = 256;
 static const int MAX_SEQ    = 16;
 static const int HALF_DIM   = HEAD_DIM / 2;  // 8
 
-// Quantization
+// 量化相关常量：
+// GEMM_IMM_K* 会被编码进微码 imm 字段，供 RTL GEMM 引擎做 requant。
 static const int GEMM_SCALE = 1;
 static const int GEMM_SHIFT = 2;
 static const uint16_t GEMM_IMM_K64  = 0x0201;  // scale=1, shift=2, for K=64
@@ -59,8 +66,9 @@ static const uint16_t GEMM_IMM_K16  = 0x0701;  // scale=1, shift=7, for K=16
 static const uint16_t GEMM_IMM_K128 = 0x0201;  // scale=1, shift=2, for K=128
 
 // =============================================================================
-// SRAM0 Memory layout for block execution (byte addresses)
-// Same as llama_map.py / tb_llama_block.cpp
+// SRAM0 内存布局（按字节寻址）
+// 这一段是 full-recompute / prefill 路径下单个 block 的工作区。
+// 约定和 llama_map.py / tb_llama_block.cpp 一致，便于共用原有权重打包格式。
 // =============================================================================
 // Weights:
 static const uint16_t ADDR_WQ       = 0x0000;  // 4x[64,16] = 4096B (4 Q-heads)
@@ -71,7 +79,8 @@ static const uint16_t ADDR_W_GATE   = 0x3000;  // [64,128]  = 8192B
 static const uint16_t ADDR_W_UP     = 0x5000;  // [64,128]  = 8192B
 static const uint16_t ADDR_W_DOWN   = 0x7000;  // [128,64]  = 8192B
 
-// Activations:
+// 激活区：
+// 这里存放 block 计算过程中的中间结果，地址尽量复用以节省片上 SRAM。
 static const uint16_t ADDR_X        = 0xA000;  // [S,64]   = 1024B
 static const uint16_t ADDR_RMS1_OUT = 0xA400;  // [S,64]   = 1024B
 static const uint16_t ADDR_Q_H      = 0xA800;  // [S,16]   =  256B (per-head, reused)
@@ -89,12 +98,16 @@ static const uint16_t ADDR_FFN_UP   = 0xC600;  // [S,128]  = 2048B
 static const uint16_t ADDR_FFN_DOWN = 0xCE00;  // [S,64]   = 1024B
 static const uint16_t ADDR_X_OUT    = 0xD200;  // [S,64]   = 1024B
 
-// SRAM0 addresses for lm_head phase (reuses SRAM0 from 0x0000)
+// lm_head 阶段会复用 SRAM0 低地址区，因此这里单独给出最终归一化与词表投影的地址。
 static const uint16_t ADDR_LM_INPUT  = 0x0000;  // [1][64]   = 64B (last token hidden)
 static const uint16_t ADDR_LM_WEIGHT = 0x0100;  // [256][64] = 16384B (lm_head)
 static const uint16_t ADDR_LM_OUTPUT = 0x4100;  // [1][256]  = 256B (logits)
 
-// SRAM1 addresses
+// SRAM1 主要作为：
+// 1. gamma / rope 等常量表缓冲；
+// 2. residual 暂存区；
+// 3. FFN 中间 staging 区；
+// 4. QKV bias 的复制区。
 static const uint16_t S1_RMS1_GAMMA = 0x0000;  // [64]
 static const uint16_t S1_RMS2_GAMMA = 0x0040;  // [64]
 static const uint16_t S1_ROPE_SIN   = 0x0080;  // [16,8] = 128B
@@ -108,7 +121,40 @@ static const uint16_t S1_BIAS_K     = 0x1240;  // N_KV_HEADS * [S,HEAD_DIM] = 51
 static const uint16_t S1_BIAS_V     = 0x1440;  // N_KV_HEADS * [S,HEAD_DIM] = 512B
 
 // =============================================================================
-// weights.bin layout offsets (must match llama_map.py)
+// Qwen decode 模式 SRAM0 布局
+// 这一段专门服务单 token decode：
+// 1. 权重仍复用 full 模式地址，避免重复定义；
+// 2. 激活单独放在 0xA000 开始的紧凑区域；
+// 3. K/V cache 的“当前可见窗口”会先通过 KV_READ 拉回这里，再进行 QK^T 和 PV。
+// =============================================================================
+static const uint16_t ADDR_QWEN_DEC_X         = 0xA000;  // [1][64]   =  64B input hidden state
+static const uint16_t ADDR_QWEN_DEC_RMS1_OUT  = 0xA040;  // [1][64]   =  64B RMSNorm1 output
+static const uint16_t ADDR_QWEN_DEC_Q_H       = 0xA080;  // [1][16]   =  16B per-head query
+static const uint16_t ADDR_QWEN_DEC_K_NEW     = 0xA090;  // [1][16]   =  16B per-head key for current token
+static const uint16_t ADDR_QWEN_DEC_V_NEW     = 0xA0A0;  // [1][16]   =  16B per-head value for current token
+static const uint16_t ADDR_QWEN_DEC_K_CACHE   = 0xA0B0;  // [T][16]   = 256B cached K vectors for one KV head
+static const uint16_t ADDR_QWEN_DEC_V_CACHE   = 0xA1B0;  // [T][16]   = 256B cached V vectors for one KV head
+static const uint16_t ADDR_QWEN_DEC_S         = 0xA2B0;  // [1][T]    =  16B attention scores
+static const uint16_t ADDR_QWEN_DEC_P         = 0xA2C0;  // [1][T]    =  16B attention probabilities
+static const uint16_t ADDR_QWEN_DEC_ATTN_H    = 0xA2D0;  // [1][16]   =  16B per-head attention output
+static const uint16_t ADDR_QWEN_DEC_ATTN      = 0xA2E0;  // [1][64]   =  64B concatenated attention
+static const uint16_t ADDR_QWEN_DEC_WO_OUT    = 0xA320;  // [1][64]   =  64B output projection
+static const uint16_t ADDR_QWEN_DEC_X2        = 0xA360;  // [1][64]   =  64B first residual result
+static const uint16_t ADDR_QWEN_DEC_RMS2_OUT  = 0xA3A0;  // [1][64]   =  64B RMSNorm2 output
+static const uint16_t ADDR_QWEN_DEC_FFN_GATE  = 0xA3E0;  // [1][128]  = 128B SwiGLU gate projection
+static const uint16_t ADDR_QWEN_DEC_FFN_UP    = 0xA460;  // [1][128]  = 128B SwiGLU up projection
+static const uint16_t ADDR_QWEN_DEC_FFN_DOWN  = 0xA4E0;  // [1][64]   =  64B down projection
+static const uint16_t ADDR_QWEN_DEC_X_OUT     = 0xA520;  // [1][64]   =  64B block output
+
+static_assert(ADDR_QWEN_DEC_X_OUT + HIDDEN <= 0x10000,
+              "Qwen decode SRAM0 layout exceeds 64KB SRAM0");
+
+// 语义别名：decode 阶段的 Q buffer 目前就是 per-head query buffer。
+static const uint16_t ADDR_QWEN_DEC_Q = ADDR_QWEN_DEC_Q_H;
+
+// =============================================================================
+// weights.bin 布局偏移（必须与 llama_map.py 完全一致）
+// 这里定义 host 侧从二进制文件切片出各类权重时的偏移。
 // =============================================================================
 static const int WTE_OFFSET     = 0;
 static const int WTE_SIZE_B     = VOCAB_SIZE * HIDDEN;                        // 16384
@@ -135,16 +181,19 @@ static const int LM_HEAD_SIZE   = VOCAB_SIZE * HIDDEN;                       // 
 static const int WEIGHTS_TOTAL  = LM_HEAD_OFFSET + LM_HEAD_SIZE;             // 181312
 
 // =============================================================================
-// Opcodes and Flags (from tb_llama_block.cpp)
+// 微码 opcode / flag 定义
+// 与 RTL 的 isa_pkg / ucode_decode 保持一致。
 // =============================================================================
 static const uint8_t OP_DMA_LOAD  = 1;
 static const uint8_t OP_GEMM      = 3;
 static const uint8_t OP_VEC       = 4;
 static const uint8_t OP_SOFTMAX   = 5;
+static const uint8_t OP_KV_APPEND = 8;
+static const uint8_t OP_KV_READ   = 9;
+static const uint8_t OP_BARRIER   = 10;
 static const uint8_t OP_RMSNORM   = 11;
 static const uint8_t OP_ROPE      = 12;
 static const uint8_t OP_SILU      = 13;
-static const uint8_t OP_BARRIER   = 10;
 static const uint8_t OP_END       = 255;
 
 static const uint8_t FLAG_TRANSPOSE_B = 0x01;
@@ -154,12 +203,14 @@ static const uint8_t FLAG_CAUSAL_MASK = 0x10;
 static const uint8_t FLAG_VEC_MUL     = 0x01;
 
 // =============================================================================
-// Debug flag
+// 调试开关
+// 设置环境变量 NPU_DUMP 后，会额外打印 DMA/每层 cycle/部分 logits 等调试信息。
 // =============================================================================
 static bool NPU_DUMP = false;
 
 // =============================================================================
-// Clock / Reset Helpers
+// 时钟 / 复位辅助函数
+// tick() 负责推动半拍与整拍，并在打开波形时同步 dump。
 // =============================================================================
 void tick() {
     dut->clk = 0;
@@ -174,6 +225,7 @@ void tick() {
 }
 
 void reset_dut(int cycles = 10) {
+    // 复位时额外跑若干拍，确保内部状态机、KV cache 以及各类寄存器回到初始态。
     dut->rst_n = 0;
     for (int i = 0; i < cycles; i++) tick();
     dut->rst_n = 1;
@@ -181,7 +233,8 @@ void reset_dut(int cycles = 10) {
 }
 
 // =============================================================================
-// SRAM Helpers
+// SRAM / UCODE 访问辅助函数
+// 这些 helper 通过 testbench 暴露端口，模拟 host 对 SRAM/UCODE SRAM 的逐字节写入。
 // =============================================================================
 void sram0_write(uint16_t addr, uint8_t data) {
     dut->tb_sram0_wr_en   = 1;
@@ -216,6 +269,7 @@ uint8_t sram1_read(uint16_t addr) {
 }
 
 void ucode_write(uint16_t addr, uint64_t hi, uint64_t lo) {
+    // 微码 SRAM 是 128-bit 宽，这里按 [lo, hi] 拆成 4 个 32-bit 段写入 DUT 端口。
     dut->uc_wr_en   = 1;
     dut->uc_wr_addr = addr;
     dut->uc_wr_data[0] = (uint32_t)(lo & 0xFFFFFFFF);
@@ -229,6 +283,10 @@ void ucode_write(uint16_t addr, uint64_t hi, uint64_t lo) {
 void encode_instr(uint8_t opcode, uint8_t flags, uint16_t dst, uint16_t src0,
                   uint16_t src1, uint16_t M, uint16_t N, uint16_t K,
                   uint16_t imm, uint64_t& hi, uint64_t& lo) {
+    // 指令编码格式：
+    // lo: opcode / flags / dst / src0 / src1
+    // hi: M / N / K / imm
+    // 这里不做任何语义判断，只负责按位打包。
     lo = (uint64_t)opcode
        | ((uint64_t)flags  << 8)
        | ((uint64_t)dst    << 16)
@@ -520,23 +578,23 @@ struct BlockWeights {
     const int8_t* bq;          // [N_Q_HEADS * HEAD_DIM] Q bias
     const int8_t* bk;          // [N_KV_HEADS * HEAD_DIM] K bias
     const int8_t* bv;          // [N_KV_HEADS * HEAD_DIM] V bias
-};
+};//内部只存了各个权重用的首地址，真读的时候会根据首地址和形状从weights_buf里切片出对应的权重矩阵。
 
 static BlockWeights block_weights[N_LAYERS];
-static const int8_t* wte;          // [VOCAB_SIZE, HIDDEN]
+static const int8_t* wte;          // [VOCAB_SIZE, HIDDEN]全是指针
 static const int8_t* ln_f_gamma;   // [HIDDEN]
 static const int8_t* lm_head;      // [VOCAB_SIZE, HIDDEN]
 static bool has_qkv_bias = false;   // true if any bias is nonzero
-
+//read weights.bin
 bool load_weights(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(path, std::ios::binary);//binary mode open
     if (!f.is_open()) {
         std::cerr << "ERROR: Cannot open weights file: " << path << std::endl;
         return false;
     }
     f.seekg(0, std::ios::end);
     size_t sz = f.tellg();
-    f.seekg(0, std::ios::beg);
+    f.seekg(0, std::ios::beg);//获取文件大小
     if ((int)sz != WEIGHTS_TOTAL) {
         std::cerr << "ERROR: weights.bin size " << sz << " != expected " << WEIGHTS_TOTAL << std::endl;
         return false;
@@ -544,7 +602,7 @@ bool load_weights(const std::string& path) {
     weights_buf.resize(sz);
     f.read(reinterpret_cast<char*>(weights_buf.data()), sz);
     f.close();
-
+    //weights_buf.data()返回首地址
     wte = weights_buf.data() + WTE_OFFSET;
 
     for (int i = 0; i < N_LAYERS; i++) {
@@ -567,6 +625,7 @@ bool load_weights(const std::string& path) {
     lm_head    = weights_buf.data() + LM_HEAD_OFFSET;
 
     // Detect nonzero bias (Qwen2 has QKV bias, LLaMA/Mistral do not)
+    //检测qkv bias
     has_qkv_bias = false;
     for (int i = 0; i < N_LAYERS && !has_qkv_bias; i++) {
         for (int j = 0; j < N_Q_HEADS * HEAD_DIM; j++)
@@ -590,13 +649,18 @@ void compute_embeddings(const std::vector<int>& tokens, int8_t* emb) {
     for (int p = 0; p < S; p++) {
         int tok = tokens[p];
         for (int h = 0; h < HIDDEN; h++) {
-            emb[p * HIDDEN + h] = wte[tok * HIDDEN + h];
+            emb[p * HIDDEN + h] = wte[tok * HIDDEN + h];//通过指针指向具体内存中的数，emb复制过来
         }
     }
 }
 
 // =============================================================================
-// DMA handler
+// DMA 处理器
+// 当前 testbench 中的 DMA 还是 shim 形式：
+// 1. RTL 发出 DMA 命令；
+// 2. C++ 拦截命令；
+// 3. 逐字节把 SRAM0 数据搬到 SRAM1。
+// 这一步主要被 residual staging / FFN staging 等场景复用。
 // =============================================================================
 void handle_dma_command() {
     uint16_t src = dut->dma_src;
@@ -608,6 +672,7 @@ void handle_dma_command() {
                   << " dst=0x" << dst << " len=" << std::dec << len << std::endl;
     }
 
+    // 按字节搬运，保持与当前 8-bit SRAM 端口行为一致。
     for (int i = 0; i < len; i++) {
         uint8_t val = sram0_read(src + i);
         sram1_write(dst + i, val);
@@ -625,8 +690,9 @@ int gen_block_microcode(int S, int ucode_addr) {
 
     // ---- RMSNorm 1 (S rows) ----
     for (int i = 0; i < S; i++) {
-        uint16_t src = ADDR_X + i * HIDDEN;
+        uint16_t src = ADDR_X + i * HIDDEN;//与装载函数对应好
         uint16_t dst = ADDR_RMS1_OUT + i * HIDDEN;
+        //只负责位拼接
         encode_instr(OP_RMSNORM, 0, dst, src, S1_RMS1_GAMMA,
                      0, HIDDEN, 0, 0, hi, lo);
         ucode_write(addr++, hi, lo);
@@ -637,6 +703,7 @@ int gen_block_microcode(int S, int ucode_addr) {
     // ---- Per Q-head attention loop (4 Q-heads, 2 KV-heads via GQA) ----
     for (int h = 0; h < N_Q_HEADS; h++) {
         int kv_h = h / GQA_RATIO;
+        //每个Wq,Wk,Wv的head投影权重大小为64x16
         uint16_t wq_h_addr = ADDR_WQ + h * HIDDEN * HEAD_DIM;
         uint16_t wk_h_addr = ADDR_WK + kv_h * HIDDEN * HEAD_DIM;
         uint16_t wv_h_addr = ADDR_WV + kv_h * HIDDEN * HEAD_DIM;
@@ -829,13 +896,491 @@ int gen_block_microcode(int S, int ucode_addr) {
 }
 
 // =============================================================================
+// 生成 Qwen prefill 微码
+// 语义说明：
+// 1. 输入是一整段 prompt 的隐藏状态 [S, HIDDEN]；
+// 2. 计算完整 block 数学流程；
+// 3. 与 full-recompute 不同的是，会把每个 KV head 的 K/V 逐 token 追加进硬件 KV cache；
+// 4. 后续 decode 阶段只需要读取 cache，而不必重新计算历史 K/V。
+// =============================================================================
+int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
+    uint64_t hi, lo;
+    int addr = ucode_addr;
+
+    // 第一步：对输入序列的每一行做 RMSNorm，输出到 RMS1_OUT。
+    for (int i = 0; i < S; i++) {
+        uint16_t src = ADDR_X + i * HIDDEN;
+        uint16_t dst = ADDR_RMS1_OUT + i * HIDDEN;
+        encode_instr(OP_RMSNORM, 0, dst, src, S1_RMS1_GAMMA,
+                     0, HIDDEN, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+    }
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第二步：按 KV 组推进 attention。
+    // 这样写能显式体现 GQA 关系：同一组的多个 Q head 共享一份 K/V。
+    for (int kv_h = 0; kv_h < N_KV_HEADS; kv_h++) {
+        uint16_t wk_h_addr = ADDR_WK + kv_h * HIDDEN * HEAD_DIM;
+        uint16_t wv_h_addr = ADDR_WV + kv_h * HIDDEN * HEAD_DIM;
+
+        // 先算这一组共享的 K。
+        encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_K_H, ADDR_RMS1_OUT, wk_h_addr,
+                     S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 如果当前权重包含 bias，则把复制到 SRAM1 的 K bias 加回 K 向量。
+        if (has_qkv_bias) {
+            uint16_t bk_sram1 = S1_BIAS_K + kv_h * S * HEAD_DIM;
+            encode_instr(OP_VEC, 0x00, ADDR_K_H, ADDR_K_H, bk_sram1,
+                         0, S * HEAD_DIM, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+
+        // 再算这一组共享的 V。
+        encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_V_H, ADDR_RMS1_OUT, wv_h_addr,
+                     S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 如果当前权重包含 bias，则把复制到 SRAM1 的 V bias 加回 V 向量。
+        if (has_qkv_bias) {
+            uint16_t bv_sram1 = S1_BIAS_V + kv_h * S * HEAD_DIM;
+            encode_instr(OP_VEC, 0x00, ADDR_V_H, ADDR_V_H, bv_sram1,
+                         0, S * HEAD_DIM, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+
+        // K 需要做 RoPE，位置偏移从序列起点 0 开始。
+        encode_instr(OP_ROPE, 0, ADDR_K_H, ADDR_K_H, S1_ROPE_SIN,
+                     S, HEAD_DIM, 0, S1_ROPE_COS, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 把这一组所有 token 的 K 逐行从sram0 append 到硬件 KV cache。
+        //这里是对PD路径特有的需要写到kv cache，这里多了block idx参数，保证写入kv时做好分层
+        //cache要分好head和layer以及token还有k/v
+        for (int i = 0; i < S; i++) {
+            encode_instr(OP_KV_APPEND, 0x00, 0, ADDR_K_H + i * HEAD_DIM, 0,
+                         blk_idx, HEAD_DIM, i, kv_h, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 把这一组所有 token 的 V 逐行 append 到硬件 KV cache。
+        //PD路径特有的写到kv cache
+        for (int i = 0; i < S; i++) {
+            encode_instr(OP_KV_APPEND, 0x01, 0, ADDR_V_H + i * HEAD_DIM, 0,
+                         blk_idx, HEAD_DIM, i, kv_h, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 对共享这一组 KV 的每个 Q head 分别做 attention。
+        for (int qg = 0; qg < GQA_RATIO; qg++) {
+            int h = kv_h * GQA_RATIO + qg;
+            uint16_t wq_h_addr = ADDR_WQ + h * HIDDEN * HEAD_DIM;
+
+            // 当前 Q head 的 Q 投影。
+            encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_Q_H, ADDR_RMS1_OUT, wq_h_addr,
+                         S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 若存在 bias，则补上 Q bias。
+            if (has_qkv_bias) {
+                uint16_t bq_sram1 = S1_BIAS_Q + h * S * HEAD_DIM;
+                encode_instr(OP_VEC, 0x00, ADDR_Q_H, ADDR_Q_H, bq_sram1,
+                             0, S * HEAD_DIM, 0, 0, hi, lo);
+                ucode_write(addr++, hi, lo);
+                encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+                ucode_write(addr++, hi, lo);
+            }
+
+            // Q 也需要做 RoPE，与 K 保持相同的相对位置编码体系。
+            encode_instr(OP_ROPE, 0, ADDR_Q_H, ADDR_Q_H, S1_ROPE_SIN,
+                         S, HEAD_DIM, 0, S1_ROPE_COS, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 计算 attention score：S = Q * K^T，结果是 [S, S]。
+            encode_instr(OP_GEMM, FLAG_TRANSPOSE_B | FLAG_REQUANT, ADDR_S, ADDR_Q_H, ADDR_K_H,
+                         S, S, HEAD_DIM, GEMM_IMM_K16, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 对每一行 score 做 causal softmax。
+            for (int i = 0; i < S; i++) {
+                uint16_t src = ADDR_S + i * S;
+                uint16_t dst = ADDR_P + i * S;
+                encode_instr(OP_SOFTMAX, FLAG_CAUSAL_MASK, dst, src, 0,
+                             0, S, i, 0x0100, hi, lo);
+                ucode_write(addr++, hi, lo);
+            }
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 计算 attention 输出：ATTN_h = P * V。
+            encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_ATTN_H, ADDR_P, ADDR_V_H,
+                         S, HEAD_DIM, S, GEMM_IMM_K16, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 把当前 head 的 [S, HEAD_DIM] 结果拷贝到大矩阵 ATTN 的对应列块中。
+            encode_instr(OP_VEC, FLAG_COPY2D, ADDR_ATTN + h * HEAD_DIM, ADDR_ATTN_H, 0,
+                         S, HEAD_DIM, HEAD_DIM, HIDDEN, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+    }
+
+    // Attention 输出拼接完成后，做输出投影 Wo。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_WO_OUT, ADDR_ATTN, ADDR_WO,
+                 S, HIDDEN, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第一次残差相加：X2 = WO_OUT + X。
+    encode_instr(OP_VEC, 0x00, ADDR_X2, ADDR_WO_OUT, S1_RESID,
+                 0, S * HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 把第一次残差结果搬到 SRAM1，供第二次残差复用。
+    encode_instr(OP_DMA_LOAD, 0, S1_RESID, ADDR_X2, 0,
+                 0, S * HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第二个 RMSNorm，仍逐行处理。
+    for (int i = 0; i < S; i++) {
+        uint16_t src = ADDR_X2 + i * HIDDEN;
+        uint16_t dst = ADDR_RMS2_OUT + i * HIDDEN;
+        encode_instr(OP_RMSNORM, 0, dst, src, S1_RMS2_GAMMA,
+                     0, HIDDEN, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+    }
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // SwiGLU 的 gate / up 两个投影。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_GATE, ADDR_RMS2_OUT, ADDR_W_GATE,
+                 S, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_UP, ADDR_RMS2_OUT, ADDR_W_UP,
+                 S, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 对 gate 分支做 SiLU。
+    encode_instr(OP_SILU, 0, ADDR_FFN_GATE, ADDR_FFN_GATE, 0,
+                 0, S * FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 把 up 分支搬到 SRAM1，后续和 gate 分支做逐元素乘法。
+    encode_instr(OP_DMA_LOAD, 0, S1_FFN_UP, ADDR_FFN_UP, 0,
+                 0, S * FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // SwiGLU 的逐元素乘法：SiLU(gate) * up。
+    encode_instr(OP_VEC, FLAG_VEC_MUL, ADDR_FFN_GATE, ADDR_FFN_GATE, S1_FFN_UP,
+                 0, S * FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // FFN 下投影回 hidden 维。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_DOWN, ADDR_FFN_GATE, ADDR_W_DOWN,
+                 S, HIDDEN, FFN_DIM, GEMM_IMM_K128, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第二次残差相加，得到 block 最终输出。
+    encode_instr(OP_VEC, 0x00, ADDR_X_OUT, ADDR_FFN_DOWN, S1_RESID,
+                 0, S * HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    encode_instr(OP_END, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    return addr - ucode_addr;
+}
+
+// =============================================================================
+// 生成 Qwen decode 微码
+// 语义说明：
+// 1. 输入只包含“当前新 token”的隐藏状态 [1, HIDDEN]；
+// 2. 历史 token 的 K/V 不再重算，而是通过 KV cache 读回；
+// 3. T 表示当前新 token 的位置，因此可见长度是 T+1；
+// 4. 这一套微码是 prefill+decode 路径的核心。
+// =============================================================================
+int gen_qwen_decode_block_microcode(int T, int blk_idx, int ucode_addr) {
+    uint64_t hi, lo;
+    int addr = ucode_addr;
+    int T_len = T + 1;
+
+    // 单 token 先做第一层 RMSNorm。
+    encode_instr(OP_RMSNORM, 0, ADDR_QWEN_DEC_RMS1_OUT, ADDR_QWEN_DEC_X, S1_RMS1_GAMMA,
+                 0, HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 仍按 KV 组推进，和 prefill 保持一致的 GQA 组织方式。
+    for (int kv_h = 0; kv_h < N_KV_HEADS; kv_h++) {
+        uint16_t wk_h_addr = ADDR_WK + kv_h * HIDDEN * HEAD_DIM;
+        uint16_t wv_h_addr = ADDR_WV + kv_h * HIDDEN * HEAD_DIM;
+
+        // 计算当前 token 的新 K。
+        encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_K_NEW, ADDR_QWEN_DEC_RMS1_OUT, wk_h_addr,
+                     1, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 可选地加上 K bias。
+        if (has_qkv_bias) {
+            uint16_t bk_sram1 = S1_BIAS_K + kv_h * HEAD_DIM;
+            encode_instr(OP_VEC, 0x00, ADDR_QWEN_DEC_K_NEW, ADDR_QWEN_DEC_K_NEW, bk_sram1,
+                         0, HEAD_DIM, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+
+        // 计算当前 token 的新 V。
+        encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_V_NEW, ADDR_QWEN_DEC_RMS1_OUT, wv_h_addr,
+                     1, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 可选地加上 V bias。
+        if (has_qkv_bias) {
+            uint16_t bv_sram1 = S1_BIAS_V + kv_h * HEAD_DIM;
+            encode_instr(OP_VEC, 0x00, ADDR_QWEN_DEC_V_NEW, ADDR_QWEN_DEC_V_NEW, bv_sram1,
+                         0, HEAD_DIM, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+
+        // 对新 K 做当前位置 T 的 RoPE。
+        encode_instr(OP_ROPE, 0, ADDR_QWEN_DEC_K_NEW, ADDR_QWEN_DEC_K_NEW, S1_ROPE_SIN,
+                     1, HEAD_DIM, T, S1_ROPE_COS, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 把当前 token 的 K/V 追加进硬件 KV cache。
+        encode_instr(OP_KV_APPEND, 0x00, 0, ADDR_QWEN_DEC_K_NEW, 0,
+                     blk_idx, HEAD_DIM, T, kv_h, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_KV_APPEND, 0x01, 0, ADDR_QWEN_DEC_V_NEW, 0,
+                     blk_idx, HEAD_DIM, T, kv_h, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 从硬件 KV cache 把当前可见长度内的 K 全部读回到 SRAM0 工作区。
+        encode_instr(OP_KV_READ, 0x00, ADDR_QWEN_DEC_K_CACHE, 0, 0,
+                     blk_idx, HEAD_DIM, T_len, kv_h, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 再把当前可见长度内的 V 全部读回到 SRAM0 工作区。
+        encode_instr(OP_KV_READ, 0x01, ADDR_QWEN_DEC_V_CACHE, 0, 0,
+                     blk_idx, HEAD_DIM, T_len, kv_h, hi, lo);
+        ucode_write(addr++, hi, lo);
+        encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+        ucode_write(addr++, hi, lo);
+
+        // 对共享这一组 K/V 的每个 Q head，分别做单 token attention。
+        for (int qg = 0; qg < GQA_RATIO; qg++) {
+            int h = kv_h * GQA_RATIO + qg;
+            uint16_t wq_h_addr = ADDR_WQ + h * HIDDEN * HEAD_DIM;
+
+            // 当前 Q head 的 query 投影，输出形状是 [1, HEAD_DIM]。
+            encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_Q_H, ADDR_QWEN_DEC_RMS1_OUT, wq_h_addr,
+                         1, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 可选地加上 Q bias。
+            if (has_qkv_bias) {
+                uint16_t bq_sram1 = S1_BIAS_Q + h * HEAD_DIM;
+                encode_instr(OP_VEC, 0x00, ADDR_QWEN_DEC_Q_H, ADDR_QWEN_DEC_Q_H, bq_sram1,
+                             0, HEAD_DIM, 0, 0, hi, lo);
+                ucode_write(addr++, hi, lo);
+                encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+                ucode_write(addr++, hi, lo);
+            }
+
+            // 对 query 做当前位置 T 的 RoPE。
+            encode_instr(OP_ROPE, 0, ADDR_QWEN_DEC_Q_H, ADDR_QWEN_DEC_Q_H, S1_ROPE_SIN,
+                         1, HEAD_DIM, T, S1_ROPE_COS, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 计算单 token 的 QK^T：
+            // [1, HEAD_DIM] x [HEAD_DIM, T_len] -> [1, T_len]
+            // 这里本质上是 GEMV，但复用统一 GEMM 引擎实现。
+            encode_instr(OP_GEMM, FLAG_TRANSPOSE_B | FLAG_REQUANT,
+                         ADDR_QWEN_DEC_S, ADDR_QWEN_DEC_Q_H, ADDR_QWEN_DEC_K_CACHE,
+                         1, T_len, HEAD_DIM, GEMM_IMM_K16, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 对这 1 行 score 做 causal softmax，得到概率向量 [1, T_len]。
+            uint16_t sm_imm = ((uint16_t)T_len) << 8;
+            encode_instr(OP_SOFTMAX, FLAG_CAUSAL_MASK, ADDR_QWEN_DEC_P, ADDR_QWEN_DEC_S, 0,
+                         0, T_len, T, sm_imm, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 计算单 token 的 P * V：
+            // [1, T_len] x [T_len, HEAD_DIM] -> [1, HEAD_DIM]。
+            encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_ATTN_H, ADDR_QWEN_DEC_P, ADDR_QWEN_DEC_V_CACHE,
+                         1, HEAD_DIM, T_len, GEMM_IMM_K16, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+
+            // 把每个 head 的 [1, HEAD_DIM] 结果拷贝到 concat attention 的对应槽位。
+            encode_instr(OP_VEC, FLAG_COPY2D,
+                         ADDR_QWEN_DEC_ATTN + h * HEAD_DIM, ADDR_QWEN_DEC_ATTN_H, 0,
+                         1, HEAD_DIM, HEAD_DIM, HIDDEN, hi, lo);
+            ucode_write(addr++, hi, lo);
+            encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+            ucode_write(addr++, hi, lo);
+        }
+    }
+
+    // 所有 head 拼接后，走输出投影 Wo。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_WO_OUT, ADDR_QWEN_DEC_ATTN, ADDR_WO,
+                 1, HIDDEN, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第一次残差相加：X2 = WO_OUT + X。
+    encode_instr(OP_VEC, 0x00, ADDR_QWEN_DEC_X2, ADDR_QWEN_DEC_WO_OUT, S1_RESID,
+                 0, HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 把第一次残差结果搬到 SRAM1，供后续 FFN 结束时做第二次残差使用。
+    encode_instr(OP_DMA_LOAD, 0, S1_RESID, ADDR_QWEN_DEC_X2, 0,
+                 0, HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第二层 RMSNorm。
+    encode_instr(OP_RMSNORM, 0, ADDR_QWEN_DEC_RMS2_OUT, ADDR_QWEN_DEC_X2, S1_RMS2_GAMMA,
+                 0, HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // SwiGLU 的 gate / up 两条投影支路。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_FFN_GATE, ADDR_QWEN_DEC_RMS2_OUT, ADDR_W_GATE,
+                 1, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_FFN_UP, ADDR_QWEN_DEC_RMS2_OUT, ADDR_W_UP,
+                 1, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // gate 分支做 SiLU。
+    encode_instr(OP_SILU, 0, ADDR_QWEN_DEC_FFN_GATE, ADDR_QWEN_DEC_FFN_GATE, 0,
+                 0, FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 把 up 分支搬到 SRAM1，准备和 gate 分支逐元素相乘。
+    encode_instr(OP_DMA_LOAD, 0, S1_FFN_UP, ADDR_QWEN_DEC_FFN_UP, 0,
+                 0, FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // SwiGLU 的逐元素乘法。
+    encode_instr(OP_VEC, FLAG_VEC_MUL, ADDR_QWEN_DEC_FFN_GATE, ADDR_QWEN_DEC_FFN_GATE, S1_FFN_UP,
+                 0, FFN_DIM, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 下投影回 hidden 维。
+    encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_QWEN_DEC_FFN_DOWN, ADDR_QWEN_DEC_FFN_GATE, ADDR_W_DOWN,
+                 1, HIDDEN, FFN_DIM, GEMM_IMM_K128, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    // 第二次残差相加，得到 decode block 的单 token 输出。
+    encode_instr(OP_VEC, 0x00, ADDR_QWEN_DEC_X_OUT, ADDR_QWEN_DEC_FFN_DOWN, S1_RESID,
+                 0, HIDDEN, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+    encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    encode_instr(OP_END, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
+    ucode_write(addr++, hi, lo);
+
+    return addr - ucode_addr;
+}
+
+// =============================================================================
 // Generate microcode for final RMSNorm on last token only
 // =============================================================================
 int gen_ln_f_microcode(int ucode_addr) {
     uint64_t hi, lo;
     int addr = ucode_addr;
 
-    // RMSNorm on last-token hidden state at ADDR_LM_INPUT (output in-place)
+    // 对最后一个 token 的 hidden 做原地 RMSNorm。
+    // 输入输出都放在 ADDR_LM_INPUT，便于后续直接送入 lm_head。
     encode_instr(OP_RMSNORM, 0, ADDR_LM_INPUT, ADDR_LM_INPUT, S1_LN_F_GAMMA,
                  0, HIDDEN, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -857,6 +1402,9 @@ int gen_lm_head_microcode(int ucode_addr) {
     uint64_t hi, lo;
     int addr = ucode_addr;
 
+    // 词表投影：
+    // [1, HIDDEN] x [HIDDEN, VOCAB] -> [1, VOCAB]
+    // B 端按转置视图读取，因此 lm_head 权重按 [VOCAB, HIDDEN] 摆放即可。
     encode_instr(OP_GEMM, FLAG_TRANSPOSE_B | FLAG_REQUANT,
                  ADDR_LM_OUTPUT, ADDR_LM_INPUT, ADDR_LM_WEIGHT,
                  1, VOCAB_SIZE, HIDDEN, GEMM_IMM_K64, hi, lo);
@@ -878,22 +1426,27 @@ int gen_lm_head_microcode(int ucode_addr) {
 int run_until_done(int max_cycles = 4000000) {
     int cycle = 0;
     while (cycle < max_cycles) {
+        // 每一拍都推进 DUT。
         tick();
         cycle++;
 
-        // DMA interception
+        // 一旦 RTL 捕获到 DMA 命令，就由 C++ testbench 代为执行，并手动回一个 done 脉冲。
         if (dut->dma_cmd_captured) {
+            //数据搬完
             handle_dma_command();
+            //告诉rtl清除dma active状态
             dut->dma_done_pulse = 1;
             tick(); cycle++;
             dut->dma_done_pulse = 0;
         }
 
+        // program_end 拉高表示当前微码程序执行完成。
         if (dut->program_end) {
             for (int i = 0; i < 10; i++) tick();
             return cycle;
         }
     }
+    // 超时返回 -1，由上层决定如何报错并退出。
     return -1;
 }
 
@@ -904,6 +1457,7 @@ void load_block_to_srams(int blk_idx, const int8_t* x_data, int S) {
     const BlockWeights& bw = block_weights[blk_idx];
 
     // SRAM0: Wq [N_Q_HEADS * HIDDEN, HEAD_DIM] = 4096B
+    //4*[64*16]；真计算wq时可以先拆wq之后直接就能把单独的每个头算出来
     for (int i = 0; i < N_Q_HEADS * HIDDEN * HEAD_DIM; i++)
         sram0_write(ADDR_WQ + i, (uint8_t)bw.wq[i]);
 
@@ -986,6 +1540,86 @@ void load_block_to_srams(int blk_idx, const int8_t* x_data, int S) {
 void read_block_output(int S, int8_t* out) {
     for (int i = 0; i < S * HIDDEN; i++)
         out[i] = (int8_t)sram0_read(ADDR_X_OUT + i);
+}
+
+// =============================================================================
+// 加载 Qwen decode 模式所需的权重与单 token 激活
+// 说明：
+// 1. 复用 full 模式的权重地址，这样 pack 后的 weights.bin 不需要区分两套格式；
+// 2. 当前 token 的激活写到 decode 专用地址区；
+// 3. bias 在 decode 下只需要复制单行，避免浪费 SRAM1 空间。
+// =============================================================================
+void load_qwen_decode_block_to_srams(int blk_idx, const int8_t* x_data) {
+    const BlockWeights& bw = block_weights[blk_idx];
+
+    // Q 投影权重。
+    for (int i = 0; i < N_Q_HEADS * HIDDEN * HEAD_DIM; i++)
+        sram0_write(ADDR_WQ + i, (uint8_t)bw.wq[i]);
+
+    // K/V 投影权重。
+    for (int i = 0; i < N_KV_HEADS * HIDDEN * HEAD_DIM; i++) {
+        sram0_write(ADDR_WK + i, (uint8_t)bw.wk[i]);
+        sram0_write(ADDR_WV + i, (uint8_t)bw.wv[i]);
+    }
+
+    // 注意力输出投影 Wo。
+    for (int i = 0; i < HIDDEN * HIDDEN; i++)
+        sram0_write(ADDR_WO + i, (uint8_t)bw.wo[i]);
+
+    // FFN 的 gate / up 两条支路权重。
+    for (int i = 0; i < HIDDEN * FFN_DIM; i++) {
+        sram0_write(ADDR_W_GATE + i, (uint8_t)bw.w_gate[i]);
+        sram0_write(ADDR_W_UP + i, (uint8_t)bw.w_up[i]);
+    }
+
+    // FFN 的 down 权重。
+    for (int i = 0; i < FFN_DIM * HIDDEN; i++)
+        sram0_write(ADDR_W_DOWN + i, (uint8_t)bw.w_down[i]);
+
+    // 当前 token 的输入隐藏状态。
+    for (int j = 0; j < HIDDEN; j++)
+        sram0_write(ADDR_QWEN_DEC_X + j, (uint8_t)x_data[j]);
+
+    // 两层 RMSNorm 的 gamma 参数。
+    for (int j = 0; j < HIDDEN; j++) {
+        sram1_write(S1_RMS1_GAMMA + j, (uint8_t)bw.rms1_gamma[j]);
+        sram1_write(S1_RMS2_GAMMA + j, (uint8_t)bw.rms2_gamma[j]);
+    }
+
+    // RoPE 查表常量。
+    for (int i = 0; i < MAX_SEQ * HALF_DIM; i++) {
+        sram1_write(S1_ROPE_SIN + i, (uint8_t)rope_sin_table[i]);
+        sram1_write(S1_ROPE_COS + i, (uint8_t)rope_cos_table[i]);
+    }
+
+    // 残差分支保存原始输入 x。
+    for (int j = 0; j < HIDDEN; j++)
+        sram1_write(S1_RESID + j, (uint8_t)x_data[j]);
+
+    // 单 token 模式下复制各 head 的 Q/K/V bias。
+    if (has_qkv_bias) {
+        for (int h = 0; h < N_Q_HEADS; h++) {
+            uint16_t base = S1_BIAS_Q + h * HEAD_DIM;
+            for (int d = 0; d < HEAD_DIM; d++)
+                sram1_write(base + d, (uint8_t)bw.bq[h * HEAD_DIM + d]);
+        }
+        for (int h = 0; h < N_KV_HEADS; h++) {
+            uint16_t base_k = S1_BIAS_K + h * HEAD_DIM;
+            uint16_t base_v = S1_BIAS_V + h * HEAD_DIM;
+            for (int d = 0; d < HEAD_DIM; d++) {
+                sram1_write(base_k + d, (uint8_t)bw.bk[h * HEAD_DIM + d]);
+                sram1_write(base_v + d, (uint8_t)bw.bv[h * HEAD_DIM + d]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// 从 decode 专用输出区读回单 token 的 block 输出
+// =============================================================================
+void read_qwen_decode_block_output(int8_t* out) {
+    for (int j = 0; j < HIDDEN; j++)
+        out[j] = (int8_t)sram0_read(ADDR_QWEN_DEC_X_OUT + j);
 }
 
 // =============================================================================
@@ -1100,12 +1734,14 @@ std::vector<int> read_golden_tokens(const std::string& path) {
 // Main
 // =============================================================================
 int main(int argc, char** argv) {
+    //argc ->命令行参数量;argv->保存所有命令行参数的字符串数组
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
     NPU_DUMP = (getenv("NPU_DUMP") != nullptr);
 
-    // Determine data directory
+    // 决定数据目录：
+    // 默认使用当前目录；环境变量 DEMO_OUTDIR 和命令行 --datadir 可覆盖。
     std::string datadir = ".";
     if (getenv("DEMO_OUTDIR")) {
         datadir = getenv("DEMO_OUTDIR");
@@ -1116,6 +1752,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    // 解析生成 token 数上限。
     int max_new_tokens = 4;
     for (int i = 1; i < argc - 1; i++) {
         if (std::string(argv[i]) == "--max-tokens") {
@@ -1123,28 +1760,38 @@ int main(int argc, char** argv) {
         }
     }
 
+    // 是否启用 KV-cache 路径：
+    // false -> full-recompute
+    // true  -> prefill + decode
+    bool use_kv_cache = false;
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--kv-cache") {
+            use_kv_cache = true;
+        }
+    }
+
     std::cout << "============================================" << std::endl;
-    std::cout << "  LLAMA INFERENCE DEMO (NPU Hardware)" << std::endl;
+    std::cout << "  QWEN INFERENCE DEMO (NPU Hardware)" << std::endl;
     std::cout << "  layers=" << N_LAYERS << " hidden=" << HIDDEN
               << " ffn=" << FFN_DIM << " vocab=" << VOCAB_SIZE << std::endl;
     std::cout << "  q_heads=" << N_Q_HEADS << " kv_heads=" << N_KV_HEADS
               << " gqa_ratio=" << GQA_RATIO << " head_dim=" << HEAD_DIM << std::endl;
     std::cout << "  max_new_tokens=" << max_new_tokens
-              << " (full-recompute)" << std::endl;
+              << (use_kv_cache ? " (prefill+decode)" : " (full-recompute)") << std::endl;
     std::cout << "  datadir=" << datadir << std::endl;
     std::cout << "============================================" << std::endl;
 
-    // Build LUTs
-    build_softmax_luts();
-    build_rsqrt_lut();
-    build_silu_lut();
-    build_rope_tables();
+    // 预先构造 host 侧参考实现所需的查找表。
+    build_softmax_luts();//e^x
+    build_rsqrt_lut();//1/sqrt(x),根号
+    build_silu_lut();//sigmoid(x)
+    build_rope_tables();//sin/cos
 
-    // Load weights
+    // 加载裁剪/量化后的 tiny Qwen 权重。
     std::string weights_path = datadir + "/weights.bin";
     if (!load_weights(weights_path)) return 1;
 
-    // Load prompt tokens
+    // 读取 prompt token 序列。
     std::string prompt_path = datadir + "/prompt_tokens.txt";
     std::vector<int> tokens = read_prompt_tokens(prompt_path);
     if (tokens.empty()) {
@@ -1155,7 +1802,7 @@ int main(int argc, char** argv) {
     for (int t : tokens) std::cout << t << " ";
     std::cout << std::endl;
 
-    // Load golden tokens (optional)
+    // 读取 Python golden token（可选，仅用于信息性对比）。
     std::string golden_path = datadir + "/golden_tokens.txt";
     std::vector<int> golden_tokens = read_golden_tokens(golden_path);
     bool have_golden = !golden_tokens.empty();
@@ -1167,18 +1814,18 @@ int main(int argc, char** argv) {
         std::cout << "No golden tokens file found (comparison skipped)" << std::endl;
     }
 
-    // Create DUT
+    // 创建 DUT 和可选 VCD 波形。
     dut = new Vllama_block_top;
     tfp = new VerilatedVcdC;
     if (NPU_DUMP) {
         dut->trace(tfp, 99);
-        tfp->open("llama_demo_infer.vcd");
+        tfp->open("qwen_demo_infer.vcd");
     } else {
         delete tfp;
         tfp = nullptr;
     }
 
-    // Initialize all inputs
+    // 对 DUT 所有输入做显式初始化，避免残留状态。
     dut->clk = 0;
     dut->rst_n = 0;
     dut->start_pulse = 0;
@@ -1192,16 +1839,278 @@ int main(int argc, char** argv) {
     dut->tb_sram1_rd_en = 0; dut->tb_sram1_rd_addr = 0;
     dut->dma_done_pulse = 0;
 
-    // Reset
+    // 统一复位 DUT，确保内部状态机/缓存处于干净状态。
     reset_dut();
 
     // ==========================================================================
-    // Full-Recompute Autoregressive Inference
+    // Inference
     // ==========================================================================
     std::vector<int> generated_tokens;
     int total_npu_cycles = 0;
     bool logits_exact = true;
     int max_logit_err_all = 0;
+
+    if (use_kv_cache) {
+        // ======================================================================
+        // PREFILL + DECODE PATH
+        // step 0 使用整段 prompt 做 prefill；
+        // step >= 1 每次只对最后一个 token 做 decode。
+        // ======================================================================
+        for (int step = 0; step < max_new_tokens; step++) {
+            int S = (int)tokens.size();
+            // 当前 demo 的可见序列长度仍受 MAX_SEQ 限制。
+            if (S > MAX_SEQ) {
+                std::cout << "WARNING: seq_len " << S << " > MAX_SEQ " << MAX_SEQ
+                          << ", stopping" << std::endl;
+                break;
+            }
+
+            // 保存当前 step 最后一个可见位置的 hidden state，
+            // 统一供 LN_F + lm_head 使用。
+            std::vector<int8_t> last_hidden(HIDDEN);
+
+            if (step == 0) {
+                // ---------------------------
+                // Prefill：处理完整 prompt
+                // ---------------------------
+                if (NPU_DUMP) {
+                    std::cout << "\n--- Prefill step " << step << " (seq_len=" << S
+                              << ") ---" << std::endl;
+                }
+
+                // host 侧 embedding 查表，得到 [S, HIDDEN]。
+                std::vector<int8_t> emb(S * HIDDEN);
+                compute_embeddings(tokens, emb.data());
+
+                // x_cur / x_next 用于层间传递整段激活。
+                std::vector<int8_t> x_cur(emb.begin(), emb.end());
+                std::vector<int8_t> x_next(S * HIDDEN);
+
+                for (int blk = 0; blk < N_LAYERS; blk++) {
+                    // 每层都重新装权重、激活与微码，然后运行到 program_end。
+                    reset_dut();
+                    // 预填充模式下，整段 prompt 都送入 NPU。
+                    load_block_to_srams(blk, x_cur.data(), S);
+
+                    int num_instrs = gen_qwen_prefill_block_microcode(S, blk, 0);
+
+                    dut->ucode_len = num_instrs;
+                    dut->start_pulse = 1;
+                    tick();
+                    dut->start_pulse = 0;
+
+                    int cycles = run_until_done();
+                    if (cycles < 0) {
+                        std::cerr << "TIMEOUT in prefill block " << blk << " step " << step << std::endl;
+                        if (tfp) tfp->close();
+                        delete dut;
+                        return 1;
+                    }
+                    total_npu_cycles += cycles;
+
+                    if (NPU_DUMP) {
+                        std::cout << "  Prefill block " << blk << ": " << cycles << " cycles" << std::endl;
+                    }
+
+                    // 读回整个 block 输出，送入下一层。
+                    read_block_output(S, x_next.data());
+                    x_cur = x_next;
+                }
+
+                // prefill 最终只取最后一个 token 的 hidden 用于生成下一个 token。
+                for (int j = 0; j < HIDDEN; j++)
+                    last_hidden[j] = x_cur[(S - 1) * HIDDEN + j];
+
+            } else {
+                // ---------------------------
+                // Decode：只处理最新 token
+                // ---------------------------
+                if (NPU_DUMP) {
+                    std::cout << "\n--- Decode step " << step << " (seq_len=" << S
+                              << ", pos=" << (S - 1) << ") ---" << std::endl;
+                }
+
+                // decode 只需要最后一个 token 的 embedding，以及它在序列中的位置 T。
+                int tok = tokens.back();
+                int T = S - 1;
+                int8_t x_dec[HIDDEN];
+                int8_t x_dec_next[HIDDEN];
+
+                for (int j = 0; j < HIDDEN; j++)
+                    x_dec[j] = wte[tok * HIDDEN + j];
+
+                for (int blk = 0; blk < N_LAYERS; blk++) {
+                    // 当前层 decode：
+                    // 1. 装入当前 token 激活；
+                    // 2. 通过 KV_APPEND / KV_READ 更新并读取 cache；
+                    // 3. 只计算单 token 输出。
+                    reset_dut();
+
+                    load_qwen_decode_block_to_srams(blk, x_dec);
+
+                    int num_instrs = gen_qwen_decode_block_microcode(T, blk, 0);
+
+                    dut->ucode_len = num_instrs;
+                    dut->start_pulse = 1;
+                    tick();
+                    dut->start_pulse = 0;
+
+                    int cycles = run_until_done();
+                    if (cycles < 0) {
+                        std::cerr << "TIMEOUT in decode block " << blk << " step " << step << std::endl;
+                        if (tfp) tfp->close();
+                        delete dut;
+                        return 1;
+                    }
+                    total_npu_cycles += cycles;
+
+                    if (NPU_DUMP) {
+                        std::cout << "  Decode block " << blk << ": " << cycles << " cycles" << std::endl;
+                    }
+
+                    // 单 token 输出读回后继续送下一层。
+                    read_qwen_decode_block_output(x_dec_next);
+                    memcpy(x_dec, x_dec_next, HIDDEN);
+                }
+
+                // decode 路径下，x_dec 本身就是最后一个位置的 hidden。
+                for (int j = 0; j < HIDDEN; j++)
+                    last_hidden[j] = x_dec[j];
+            }
+
+            // 两条路径prefill+decode路径在 block 结束后统一走 LN_F（last RMSNorm）。
+            reset_dut();
+            for (int j = 0; j < HIDDEN; j++)
+                sram1_write(S1_LN_F_GAMMA + j, (uint8_t)ln_f_gamma[j]);
+            for (int j = 0; j < HIDDEN; j++)
+                sram0_write(ADDR_LM_INPUT + j, (uint8_t)last_hidden[j]);
+            //最后一级RMSNorm
+            int ln_instrs = gen_ln_f_microcode(0);
+            dut->ucode_len = ln_instrs;
+            dut->start_pulse = 1;
+            tick();
+            dut->start_pulse = 0;
+
+            int ln_cycles = run_until_done();
+            if (ln_cycles < 0) {
+                std::cerr << "TIMEOUT in LN_F step " << step << std::endl;
+                if (tfp) tfp->close();
+                delete dut;
+                return 1;
+            }
+            total_npu_cycles += ln_cycles;
+
+            int8_t ln_f_out[HIDDEN];
+            for (int j = 0; j < HIDDEN; j++)
+                ln_f_out[j] = (int8_t)sram0_read(ADDR_LM_INPUT + j);
+            //LM head
+            reset_dut();
+            for (int j = 0; j < HIDDEN; j++)
+                sram0_write(ADDR_LM_INPUT + j, (uint8_t)ln_f_out[j]);
+            for (int i = 0; i < VOCAB_SIZE; i++)
+                for (int j = 0; j < HIDDEN; j++)
+                    sram0_write(ADDR_LM_WEIGHT + i * HIDDEN + j,
+                               (uint8_t)lm_head[i * HIDDEN + j]);
+
+            int lm_instrs = gen_lm_head_microcode(0);
+            dut->ucode_len = lm_instrs;
+            dut->start_pulse = 1;
+            tick();
+            dut->start_pulse = 0;
+
+            int lm_cycles = run_until_done();
+            if (lm_cycles < 0) {
+                std::cerr << "TIMEOUT in lm_head step " << step << std::endl;
+                if (tfp) tfp->close();
+                delete dut;
+                return 1;
+            }
+            total_npu_cycles += lm_cycles;
+
+            // 读回整个词表的 logits。
+            int8_t logits[VOCAB_SIZE];
+            for (int i = 0; i < VOCAB_SIZE; i++)
+                logits[i] = (int8_t)sram0_read(ADDR_LM_OUTPUT + i);
+
+            // 当前 demo 采用 greedy argmax 选 token。
+            int next_tok = 0;
+            int8_t max_logit = logits[0];
+            for (int i = 1; i < VOCAB_SIZE; i++) {
+                if (logits[i] > max_logit) {
+                    max_logit = logits[i];
+                    next_tok = i;
+                }
+            }
+
+            // 使用 C++ golden 对 lm_head 做 bit-exact 对照。
+            int8_t gold_logits[VOCAB_SIZE];
+            gemm_golden(ln_f_out, lm_head, gold_logits, 1, VOCAB_SIZE, HIDDEN, true,
+                        GEMM_SCALE, GEMM_SHIFT);
+
+            int gold_tok = 0;
+            int8_t gold_max = gold_logits[0];
+            for (int i = 1; i < VOCAB_SIZE; i++) {
+                if (gold_logits[i] > gold_max) {
+                    gold_max = gold_logits[i];
+                    gold_tok = i;
+                }
+            }
+
+            // 统计本 step 全词表最大误差。
+            int logit_max_err = 0;
+            for (int i = 0; i < VOCAB_SIZE; i++) {
+                int err = abs((int)logits[i] - (int)gold_logits[i]);
+                if (err > logit_max_err) logit_max_err = err;
+            }
+
+            if (logit_max_err > max_logit_err_all)
+                max_logit_err_all = logit_max_err;
+            if (logit_max_err > 0)
+                logits_exact = false;
+
+            // 额外检查 LN_F 输出误差，便于区分 drift 来自 block 还是最终投影。
+            int8_t gold_rms_f[HIDDEN];
+            rmsnorm_golden(last_hidden.data(), gold_rms_f, HIDDEN, ln_f_gamma);
+            int rms_f_max_err = 0;
+            for (int j = 0; j < HIDDEN; j++) {
+                int err = abs((int)ln_f_out[j] - (int)gold_rms_f[j]);
+                if (err > rms_f_max_err) rms_f_max_err = err;
+            }
+
+            std::cout << "  Step " << std::setw(2) << step
+                      << ": npu_tok=" << std::setw(3) << next_tok
+                      << " gold_tok=" << std::setw(3) << gold_tok
+                      << " logit_max_err=" << logit_max_err
+                      << (logit_max_err == 0 ? " EXACT" : " DRIFT")
+                      << " rms_f_err=" << rms_f_max_err
+                      << (step == 0 ? " [prefill]" : " [decode]")
+                      << std::endl;
+
+            if (NPU_DUMP) {
+                std::cout << "    logits[0:15]: ";
+                for (int i = 0; i < 16; i++) std::cout << (int)logits[i] << " ";
+                std::cout << std::endl;
+                std::cout << "    gold_l[0:15]: ";
+                for (int i = 0; i < 16; i++) std::cout << (int)gold_logits[i] << " ";
+                std::cout << std::endl;
+            }
+
+            if (have_golden && step < (int)golden_tokens.size()) {
+                if (next_tok != golden_tokens[step]) {
+                    std::cout << "    NOTE: NPU token " << next_tok
+                              << " != Python golden " << golden_tokens[step] << std::endl;
+                }
+            }
+
+            // 记录并回灌新 token，供下一步自回归继续使用。
+            generated_tokens.push_back(next_tok);
+            tokens.push_back(next_tok);
+        }
+    } else {
+        // ======================================================================
+        // FULL-RECOMPUTE PATH
+        // 每一步都对“当前完整上下文”重新计算所有层。
+        // ======================================================================
 
     for (int step = 0; step < max_new_tokens; step++) {
         int S = (int)tokens.size();
@@ -1216,23 +2125,25 @@ int main(int argc, char** argv) {
                       << ") ---" << std::endl;
         }
 
-        // 1. Compute embeddings (host-side, WTE lookup only)
+        // 1. 在 host 侧查 embedding，得到当前完整序列的输入激活。
         std::vector<int8_t> emb(S * HIDDEN);
         compute_embeddings(tokens, emb.data());
 
-        // 2. Run N_LAYERS transformer blocks on NPU
+        // 2. 逐层运行 block，每一层都处理完整序列。
         std::vector<int8_t> x_cur(emb.begin(), emb.end());
         std::vector<int8_t> x_next(S * HIDDEN);
 
         for (int blk = 0; blk < N_LAYERS; blk++) {
             reset_dut();
+            //装载权重和激活
             load_block_to_srams(blk, x_cur.data(), S);
+            //生成指令并通过ucode_write写到dut的ucode sram中
             int num_instrs = gen_block_microcode(S, 0);
             dut->ucode_len = num_instrs;
             dut->start_pulse = 1;
             tick();
             dut->start_pulse = 0;
-
+            //驱动并等待本层结束
             int cycles = run_until_done();
             if (cycles < 0) {
                 std::cerr << "TIMEOUT in block " << blk << " step " << step << std::endl;
@@ -1250,7 +2161,7 @@ int main(int argc, char** argv) {
             x_cur = x_next;
         }
 
-        // 3. Final RMSNorm on last token
+        // 3. 只取最后一个位置，进入最终 RMSNorm。
         reset_dut();
 
         // Load LN_F gamma to SRAM1
@@ -1258,6 +2169,7 @@ int main(int argc, char** argv) {
             sram1_write(S1_LN_F_GAMMA + j, (uint8_t)ln_f_gamma[j]);
 
         // Write last-token hidden state to SRAM0 ADDR_LM_INPUT
+        //只取最后一个位置的 hidden state 作为 LN_F 输入
         for (int j = 0; j < HIDDEN; j++)
             sram0_write(ADDR_LM_INPUT + j, (uint8_t)x_cur[(S - 1) * HIDDEN + j]);
 
@@ -1282,7 +2194,7 @@ int main(int argc, char** argv) {
         for (int j = 0; j < HIDDEN; j++)
             ln_f_out[j] = (int8_t)sram0_read(ADDR_LM_INPUT + j);
 
-        // 4. LM Head on NPU
+        // 4. 对最终 hidden 做 lm_head，得到词表 logits。
         reset_dut();
 
         // Write RMSNorm output to ADDR_LM_INPUT
@@ -1311,7 +2223,7 @@ int main(int argc, char** argv) {
         }
         total_npu_cycles += lm_cycles;
 
-        // 5. Read logits and select next token (greedy argmax)
+        // 5. 读回 logits，并以 greedy（贪心算法取最大值） 方式选下一个 token。
         int8_t logits[VOCAB_SIZE];
         for (int i = 0; i < VOCAB_SIZE; i++)
             logits[i] = (int8_t)sram0_read(ADDR_LM_OUTPUT + i);
@@ -1325,9 +2237,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        // 6. C++ golden verification (follow-actual approach)
-        // Use the ACTUAL NPU RMSNorm output for golden lm_head GEMM.
-        // This eliminates cascading RMSNorm rounding differences.
+        // 6. C++ golden 对照（follow-actual 策略）
+        // 这里故意使用“实际 NPU 输出的 LN_F （RMSNorm）结果”做 golden lm_head，
+        // 避免 RMSNorm 的舍入误差继续放大到最终 logits 对比里。
         int8_t gold_logits[VOCAB_SIZE];
         gemm_golden(ln_f_out, lm_head, gold_logits, 1, VOCAB_SIZE, HIDDEN, true,
                     GEMM_SCALE, GEMM_SHIFT);
@@ -1342,6 +2254,7 @@ int main(int argc, char** argv) {
         }
 
         // Compare NPU logits with follow-actual C++ golden
+        //单独验证 LM Head GEMM
         int logit_max_err = 0;
         for (int i = 0; i < VOCAB_SIZE; i++) {
             int err = abs((int)logits[i] - (int)gold_logits[i]);
@@ -1353,7 +2266,7 @@ int main(int argc, char** argv) {
         if (logit_max_err > 0)
             logits_exact = false;
 
-        // Compare NPU RMSNorm output with C++ golden (informational)
+        // Compare NPU RMSNorm output with C++ golden (informational，单纯看信息，golden c++与实际的npu的RMSNrom)
         int8_t gold_rms_f[HIDDEN];
         rmsnorm_golden(x_cur.data() + (S - 1) * HIDDEN, gold_rms_f, HIDDEN, ln_f_gamma);
         int rms_f_max_err = 0;
@@ -1379,7 +2292,7 @@ int main(int argc, char** argv) {
             std::cout << std::endl;
         }
 
-        // Compare with Python golden (informational)
+        // Compare with Python golden (informational，信息化对比)
         if (have_golden && step < (int)golden_tokens.size()) {
             if (next_tok != golden_tokens[step]) {
                 std::cout << "    NOTE: NPU token " << next_tok
@@ -1387,9 +2300,11 @@ int main(int argc, char** argv) {
             }
         }
 
-        generated_tokens.push_back(next_tok);
-        tokens.push_back(next_tok);
+        generated_tokens.push_back(next_tok);//accept generated token
+        tokens.push_back(next_tok);//accept all token ,to continue the next full-recompute step
     }
+
+    } // end full-recompute / kv-cache skeleton
 
     // ==========================================================================
     // Summary
@@ -1419,8 +2334,9 @@ int main(int argc, char** argv) {
     std::cout << "============================================" << std::endl;
 
     // Pass criterion: logits must be bit-exact with C++ follow-actual golden
+    //pass依据
     bool pass = logits_exact;
-    std::cout << "  LLAMA DEMO: " << (pass ? "PASS" : "FAIL") << std::endl;
+    std::cout << "  QWEN DEMO: " << (pass ? "PASS" : "FAIL") << std::endl;
     std::cout << "============================================" << std::endl;
 
     // Save generated tokens

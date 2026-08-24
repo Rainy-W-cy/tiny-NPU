@@ -26,11 +26,11 @@ class TinyLLaMAGolden:
         self.shift_k16 = shift_k16
         self.shift_k128 = shift_k128
 
-        # Generate RoPE tables
+        # Generate RoPE tables,one position ->a pair of sin/cos values for each head dimension
         self.sin_table, self.cos_table = make_rope_tables(
             max_seq, head_dim, base=rope_base)
 
-        # Initialize random int8 weights
+        # Initialize random int8 weights,defalut
         rng = np.random.RandomState(42)
 
         # Per-head Q weights [n_q_heads, hidden, head_dim]
@@ -61,7 +61,7 @@ class TinyLLaMAGolden:
         self.bq = None   # [n_q_heads, head_dim]
         self.bk = None   # [n_kv_heads, head_dim]
         self.bv = None   # [n_kv_heads, head_dim]
-
+    #signal block
     def run_block(self, x):
         """
         Full LLaMA transformer block forward pass.
@@ -71,7 +71,7 @@ class TinyLLaMAGolden:
         S, H = x.shape
         assert H == self.hidden
 
-        # 1. RMSNorm 1
+        # 1. RMSNorm 1;均方根归一化
         rms1_out = np.zeros_like(x)
         for s in range(S):
             rms1_out[s] = rmsnorm_fixed(x[s], self.rms1_gamma)
@@ -166,14 +166,15 @@ class TinyLLaMAGolden:
         Returns: int8 [seq_len, hidden]
         """
         return wte[tokens].astype(np.int8)
-
+    #forward function
     def forward(self, tokens, wte, blocks_weights, ln_f_gamma, lm_head):
         """
         Full LLaMA inference: embed -> blocks -> final RMSNorm -> lm_head.
         Returns: int8 logits [1, vocab_size]
         """
+        #x: [seq_len, hidden]
         x = self.embed(tokens, wte)
-
+        #每一层load weight，并run block
         for block_w in blocks_weights:
             self.rms1_gamma = block_w['rms1_gamma']
             self.rms2_gamma = block_w['rms2_gamma']
@@ -187,6 +188,7 @@ class TinyLLaMAGolden:
             self.bq = block_w.get('bq', None)
             self.bk = block_w.get('bk', None)
             self.bv = block_w.get('bv', None)
+            #run block
             x = self.run_block(x)
 
         # Final RMSNorm

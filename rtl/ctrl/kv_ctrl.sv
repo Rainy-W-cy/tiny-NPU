@@ -90,7 +90,7 @@ module kv_ctrl
     // 128-bit vector register for packing/unpacking
     logic [VEC_W-1:0] vec_reg;
 
-    // Time counter for multi-vector reads
+    // Time counter for multi-vector reads(token position)
     logic [15:0] time_cnt;
 
     // SRAM0 read pipeline: data arrives 1 cycle after addr
@@ -158,7 +158,7 @@ module kv_ctrl
             rd_pipe_valid <= 1'b0;
             pack_idx      <= '0;
         end else begin
-            rd_pipe_valid <= sram_rd_en && (state == KV_APPEND_RD);
+            rd_pipe_valid <= sram_rd_en && (state == KV_APPEND_RD);//align sram 1 cycle delay 
             if (sram_rd_en && (state == KV_APPEND_RD))
                 pack_idx <= byte_cnt;
         end
@@ -171,7 +171,7 @@ module kv_ctrl
         if (!rst_n) begin
             vec_reg <= '0;
         end else if (rd_pipe_valid) begin
-            vec_reg[pack_idx*8 +: 8] <= sram_rd_data;
+            vec_reg[pack_idx*8 +: 8] <= sram_rd_data;//package
         end else if (state == KV_READ_WAIT && read_data_valid) begin
             vec_reg <= read_data;
         end
@@ -211,7 +211,7 @@ module kv_ctrl
                 // byte_cnt counts 0..n_r-1 for issuing addresses
                 // Need one extra cycle for last byte's read latency
                 if (byte_cnt >= n_r) begin
-                    // All addresses issued, wait for last byte
+                    // All addresses issued, wait for last byte,more 1 counter number
                     state_next = KV_APPEND_WR;
                 end
             end
@@ -237,7 +237,7 @@ module kv_ctrl
             end
 
             KV_READ_NEXT: begin
-                if (time_cnt + 16'd1 >= k_r)
+                if (time_cnt + 16'd1 >= k_r)//读多少条在ctrl接收ucode时被告知，逐条取
                     state_next = KV_DONE;
                 else
                     state_next = KV_READ_REQ;
@@ -265,7 +265,7 @@ module kv_ctrl
         case (state)
             KV_APPEND_RD: begin
                 // Issue SRAM0 read for byte[byte_cnt]
-                if (byte_cnt < n_r) begin
+                if (byte_cnt < n_r) begin//byte_cnt=16,not read request
                     sram_rd_en   = 1'b1;
                     sram_rd_addr = src_r + byte_cnt;
                 end

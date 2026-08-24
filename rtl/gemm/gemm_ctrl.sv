@@ -85,6 +85,9 @@ module gemm_ctrl
         ST_TILE_NEXT,
         ST_DONE
     } state_t;
+    //load负责将tile加载到buffer中
+    //stream负责将buffer中的数据错拍放到脉动阵列
+    //store负责将partial sum放到acc_sram
 
     state_t state, state_next;
 
@@ -265,7 +268,7 @@ module gemm_ctrl
     // ACC SRAM address for current store element
     // =========================================================================
     logic [7:0] acc_elem_addr;
-    assign acc_elem_addr = {3'b0, store_row} * {3'b0, n_eff} + {3'b0, store_col};
+    assign acc_elem_addr = {3'b0, store_row} * {3'b0, n_eff} + {3'b0, store_col};//行数*n tile中有效dim(判断列数)+列数；
 
     // =========================================================================
     // Output logic (active-low reset defaults)
@@ -334,14 +337,15 @@ module gemm_ctrl
             ST_STREAM: begin
                 sa_en = 1'b1;
                 // INT8 streaming
+                //i为row，对于a来说并行多行，错位进入
                 for (int i = 0; i < ARRAY_M; i++) begin
-                    automatic int idx_a = int'(stream_cnt) - i;
+                    automatic int idx_a = int'(stream_cnt) - i;//为了错拍，每行错拍，行内错拍
                     if (idx_a >= 0 && idx_a < int'(k_eff) && i < int'(m_eff))
-                        sa_a_col[i] = buf_a[i][idx_a[3:0]];
+                        sa_a_col[i] = buf_a[i][idx_a[3:0]];//send sa for one column numbers
                     else
                         sa_a_col[i] = '0;
                 end
-                for (int j = 0; j < ARRAY_N; j++) begin
+                for (int j = 0; j < ARRAY_N; j++) begin//j为列，对于从上到下的
                     automatic int idx_b = int'(stream_cnt) - j;
                     if (idx_b >= 0 && idx_b < int'(k_eff) && j < int'(n_eff))
                         sa_b_row[j] = buf_b[idx_b[3:0]][j];
@@ -377,7 +381,7 @@ module gemm_ctrl
                     end else begin
                         // INT8: requantize directly to output SRAM
                         sram_wr_addr = c_tile_base + {11'b0, store_row} * r_N + {11'b0, store_col};
-                        if (r_do_requant)
+                        if (r_do_requant)//judge if requant
                             sram_wr_data = requantize(sa_acc[store_row[3:0]][store_col[3:0]],
                                                       r_scale, r_shift);
                         else
@@ -420,7 +424,7 @@ module gemm_ctrl
                             // Middle K-tile: accumulate and write back to ACC SRAM
                             acc_wr_en   = 1'b1;
                             acc_wr_addr = acc_elem_addr;
-                            acc_wr_data = acc_rd_data + sa_acc[store_row[3:0]][store_col[3:0]];
+                            acc_wr_data = acc_rd_data + sa_acc[store_row[3:0]][store_col[3:0]];//sa_acc是一个二维寄存器阵列[][]
                         end
                     end
                 end
@@ -502,12 +506,12 @@ module gemm_ctrl
                         r_dtype       <= cmd_dtype;
                     end
                 end
-
+//--------------------------compute tile M N k-------------------------
                 ST_SETUP: begin
                     // Compute tile counts
-                    m_tiles_r <= 4'((r_M + 16'd15) >> 4);
-                    n_tiles_r <= 4'((r_N + 16'd15) >> 4);
-                    k_tiles_r <= 4'((r_K + 16'd15) >> 4);
+                    m_tiles_r <= 4'((r_M + 16'd15) >> 4);//算一共拆分几个tile
+                    n_tiles_r <= 4'((r_N + 16'd15) >> 4);//算一共拆分几个tile
+                    k_tiles_r <= 4'((r_K + 16'd15) >> 4);//算一共拆分几个tile
                     // Reset tile counters
                     m_tile_r  <= '0;
                     n_tile_r  <= '0;
@@ -516,8 +520,9 @@ module gemm_ctrl
 
                 ST_TILE_SETUP: begin
                     // Compute per-tile effective dimensions
+                    //假设M 32,N 32,K 64
                     begin
-                        automatic logic [15:0] m_remain = r_M - {12'b0, m_tile_r} * 16'd16;
+                        automatic logic [15:0] m_remain = r_M - {12'b0, m_tile_r} * 16'd16;//
                         automatic logic [15:0] n_remain = r_N - {12'b0, n_tile_r} * 16'd16;
                         automatic logic [15:0] k_remain = r_K - {12'b0, k_tile_r} * 16'd16;
                         m_eff <= (m_remain < 16) ? m_remain[4:0] : 5'd16;
@@ -594,7 +599,7 @@ module gemm_ctrl
                             end
                         end else begin
                             // INT8: existing behavior
-                            buf_a[load_row][load_col] <= signed'(sram_rd_data);
+                            buf_a[load_row][load_col] <= signed'(sram_rd_data);//按列加载
                             load_phase <= 1'b0;
                             if (load_col == k_eff - 5'd1) begin
                                 load_col <= '0;
@@ -640,7 +645,7 @@ module gemm_ctrl
                             end
                         end else begin
                             // INT8: existing behavior
-                            buf_b[load_row][load_col] <= signed'(sram_rd_data);
+                            buf_b[load_row][load_col] <= signed'(sram_rd_data);//按行加载
                             load_phase <= 1'b0;
                             if (load_col == n_eff - 5'd1) begin
                                 load_col <= '0;
@@ -675,7 +680,7 @@ module gemm_ctrl
                                 store_byte <= 1'b1;
                             end else begin
                                 store_byte <= 1'b0;
-                                if (store_col == n_eff - 5'd1) begin
+                                if (store_col == n_eff - 5'd1) begin//先存列，在存行
                                     store_col <= '0;
                                     store_row <= store_row + 5'd1;
                                 end else begin

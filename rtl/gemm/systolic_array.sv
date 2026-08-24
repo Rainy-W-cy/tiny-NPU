@@ -1,6 +1,6 @@
 // =============================================================================
 // MxN Systolic Array (default 16x16 = 256 MACs, parameterizable to 24x24)
-// Weight-stationary style: A flows east, B flows south
+// output-stationary style: A flows east, B flows south
 // Supports INT8 and FP16 data types via dtype_fp16 select
 //
 // Pipeline registers are inserted every PIPE_STAGE rows/columns to break
@@ -75,11 +75,11 @@ module systolic_array #(
     genvar gi, gj;
     generate
         for (gi = 0; gi < M; gi++) begin : gen_a_input
-            assign a_wire[gi][0]      = a_col[gi];
+            assign a_wire[gi][0]      = a_col[gi];//column,every load one new column
             assign a_wire_fp16[gi][0] = a_col_fp16[gi];
         end
         for (gj = 0; gj < N; gj++) begin : gen_b_input
-            assign b_wire[0][gj]      = b_row[gj];
+            assign b_wire[0][gj]      = b_row[gj];//row,every load one new row
             assign b_wire_fp16[0][gj] = b_row_fp16[gj];
         end
     endgenerate
@@ -101,7 +101,7 @@ module systolic_array #(
                             a_pipe[gi][gj]      <= '0;
                             a_pipe_fp16[gi][gj] <= '0;
                         end else if (en) begin
-                            a_pipe[gi][gj]      <= a_wire[gi][gj];
+                            a_pipe[gi][gj]      <= a_wire[gi][gj];//load to pipeline reg
                             a_pipe_fp16[gi][gj] <= a_wire_fp16[gi][gj];
                         end
                     end

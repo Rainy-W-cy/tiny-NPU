@@ -157,7 +157,7 @@ module llama_block_top
     logic barrier_trigger;
     logic barrier_stall;
     logic barrier_done;
-
+    //未用到这个barrier，通过scoreborad和decode即可完成barrier的效果
     barrier u_barrier (
         .clk      (clk),
         .rst_n    (rst_n),
@@ -640,6 +640,7 @@ module llama_block_top
     logic [7:0]              s0_b_din;
 
     // SRAM0 read mux (port A) - GEMM HW has highest priority
+    // gemm - softmax -layernorm - rmsnorm -rope -gelu/silu -vector - kv cache
     always_comb begin
         if (gm_busy) begin
             s0_a_en   = gm_rd_en;
@@ -672,6 +673,7 @@ module llama_block_top
     end
 
     // SRAM0 write mux (port B) - GEMM HW has highest priority
+    //
     always_comb begin
         if (gm_busy) begin
             s0_b_en   = gm_wr_en;
@@ -976,6 +978,7 @@ module llama_block_top
     // ================================================================
     // Engine done vector wiring
     // ================================================================
+    // scoreboard manage all engine busy flag bits
     assign engine_done_vec[0] = gm_done;                  // ENG_GEMM
     assign engine_done_vec[1] = sm_done;                  // ENG_SOFTMAX
     assign engine_done_vec[2] = ln_done;                  // ENG_LAYERNORM
@@ -988,6 +991,7 @@ module llama_block_top
     // ================================================================
     // program_end latch
     // ================================================================
+    //first judge fetch or decode "end " micro code
     logic fetch_done_latch;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
@@ -997,7 +1001,7 @@ module llama_block_top
         else if (fetch_done || program_end_dec)
             fetch_done_latch <= 1'b1;
     end
-
+    //second judge "end" and all engine idle, avoid host thinking about ending it early
     logic program_end_latch;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)

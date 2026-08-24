@@ -118,8 +118,9 @@ def extract_weights(tensors):
         bw['rms1_gamma'] = quantize_gamma(
             tensors[f"{prefix}.input_layernorm.weight"][:HIDDEN])
 
-        # Q projection
+        # Q projection [896, 896]
         q_weight = tensors[f"{prefix}.self_attn.q_proj.weight"]
+        #reshape to [head num;head dim;hidden] and clip
         q_sliced = slice_qkv(q_weight, HF_N_HEADS, HF_HEAD_DIM, HF_HIDDEN,
                              N_Q_HEADS, HEAD_DIM, HIDDEN)
         bw['Wq'] = np.zeros((N_Q_HEADS, HIDDEN, HEAD_DIM), dtype=np.int8)
@@ -157,7 +158,8 @@ def extract_weights(tensors):
         bw['bv'] = quantize_tensor(
             slice_bias(v_bias, HF_N_KV_HEADS, HF_HEAD_DIM, N_KV_HEADS, HEAD_DIM))
 
-        # O projection
+        # O projection 
+        #Wo 负责把多个 Q head 的 attention 输出重新投影到 hidden。这里需要注意，不是直接取左上角
         o_weight = tensors[f"{prefix}.self_attn.o_proj.weight"]
         o_sliced = slice_o_proj(o_weight, HF_HEAD_DIM,
                                 N_Q_HEADS, HEAD_DIM, HIDDEN)
@@ -245,7 +247,7 @@ def main():
 
     put(LN_F_OFFSET, ln_f_gamma)
     put(LM_HEAD_OFFSET, lm_head_w)
-
+    #写入weights.bin
     weights_path = os.path.join(args.outdir, "weights.bin")
     with open(weights_path, "wb") as f:
         f.write(buf)

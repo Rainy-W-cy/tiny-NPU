@@ -162,8 +162,11 @@ module exp_lut (
         rom[127] = 16'd13181;
 
         // Negative side (signed -128..-1): exp(signed_i/32)*256
-        rom[128] = 16'd5;      // exp(-128/32)*256 = exp(-4)*256 = 4.7
-        rom[129] = 16'd5;
+        // signed int8 =((-1)^1*2^7)+.......;Binary Format
+        //addr < 128  ：signed_i = addr
+        // addr >= 128 ：signed_i = addr - 256
+        rom[128] = 16'd5;      // exp(-128/32)*256 = exp(-4)*256 = 4.7;1_000_0000
+        rom[129] = 16'd5;      //exp(-127/32)*256    ;1_000_0001
         rom[130] = 16'd5;
         rom[131] = 16'd5;
         rom[132] = 16'd5;
