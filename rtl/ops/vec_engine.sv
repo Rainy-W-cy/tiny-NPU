@@ -13,7 +13,7 @@ module vec_engine (
     input  logic                cmd_valid,
     output logic                cmd_ready,
     input  logic [1:0]          opcode,       // 0=ADD 1=MUL 2=SCALE_SHIFT 3=CLAMP
-    input  logic [15:0]         length,       // number of elements
+    input  logic [15:0]         length,       // number of elements in one row;N openrand
     input  logic [15:0]         src0_base,
     input  logic [15:0]         src1_base,
     input  logic [15:0]         dst_base,
@@ -22,9 +22,9 @@ module vec_engine (
 
     // COPY2D mode (flags[2] = 1)
     input  logic                copy2d_mode,  // flags[2]
-    input  logic [15:0]         cmd_M,        // number of rows (from instr.M)
-    input  logic [15:0]         cmd_K,        // src stride   (from instr.K)
-    input  logic [15:0]         cmd_imm,      // dst stride   (from instr.imm)
+    input  logic [15:0]         cmd_M,        // number of rows (from instr.M),row num
+    input  logic [15:0]         cmd_K,        // src stride   (from instr.K),head dim
+    input  logic [15:0]         cmd_imm,      // dst stride   (from instr.imm),hidden dim
 
     // SRAM read port 0 (src0)
     output logic                sram_rd0_en,
@@ -176,7 +176,7 @@ module vec_engine (
     // ----------------------------------------------------------------
     assign sram_rd0_en   = (state == S_READ);
     assign sram_rd0_addr = r_copy2d ? (r_src0_base + r_row_idx * r_src_stride + r_col_idx)
-                                    : (r_src0_base + r_idx);
+                                    : (r_src0_base + r_idx);//src_stride=head dim
     assign sram_rd1_en   = (state == S_READ) && !r_copy2d && (r_opcode == OP_ADD || r_opcode == OP_MUL);
     assign sram_rd1_addr = r_src1_base + r_idx;
 
@@ -228,7 +228,7 @@ module vec_engine (
     // ----------------------------------------------------------------
     assign sram_wr_en   = (state == S_PROCESS);
     assign sram_wr_addr = r_copy2d ? (r_dst_base + r_row_idx * r_dst_stride + r_col_idx)
-                                   : (r_dst_base + r_idx);
+                                   : (r_dst_base + r_idx);//copy2d send to dst_stride is end;stride = hidden dimension
     assign sram_wr_data = r_copy2d ? p_src0[DATA_W-1:0] : result;
 
     // ----------------------------------------------------------------

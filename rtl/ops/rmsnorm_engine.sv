@@ -51,6 +51,7 @@ module rmsnorm_engine (
         S_RSQRT,         // Feed E[x^2] top bits to rsqrt LUT
         S_RSQRT_LATCH,   // Latch rsqrt result (1-cycle LUT latency)
         S_P2_READ,       // Pass 2: read x[i] from SRAM0, gamma[i] from SRAM1
+        S_P2_LATCH,      // Pass 2: latch gamma and input xi
         S_P2_COMPUTE,    // Pass 2: compute normalized output
         S_DONE
     } state_t;
@@ -110,7 +111,8 @@ module rmsnorm_engine (
             S_P1_DIVIDE:    if (div_count == 6'd0) state_nxt = S_RSQRT;
             S_RSQRT:        state_nxt = S_RSQRT_LATCH;
             S_RSQRT_LATCH:  state_nxt = S_P2_READ;
-            S_P2_READ:      state_nxt = S_P2_COMPUTE;
+            S_P2_READ:      state_nxt = S_P2_LATCH;
+            S_P2_LATCH:     state_nxt = S_P2_COMPUTE;
             S_P2_COMPUTE:   state_nxt = (r_idx == r_length - 16'd1) ? S_DONE : S_P2_READ;
             S_DONE:         state_nxt = S_IDLE;
             default:        state_nxt = S_IDLE;
@@ -142,7 +144,7 @@ module rmsnorm_engine (
             r_idx <= '0;
         else if (state == S_IDLE && cmd_valid)
             r_idx <= '0;
-        else if (state == S_P1_ACCUM && state_nxt == S_P1_READ)
+        else if (state == S_P1_ACCUM && state_nxt == S_P1_READ)//ACCUM update IDX, READ use this IDX
             r_idx <= r_idx + 16'd1;
         else if (state == S_P1_DIVIDE && div_count == 6'd0)
             r_idx <= '0;  // reset for pass 2
@@ -155,7 +157,7 @@ module rmsnorm_engine (
     // ----------------------------------------------------------------
     logic signed [7:0] x_signed;
     logic [15:0] sq_val;  // x^2 (signed square, always >= 0)
-    assign x_signed = sram_rd0_data;
+    assign x_signed = sram_rd0_data;//state = S_P1_ACCUM
     assign sq_val   = x_signed * x_signed;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -166,7 +168,7 @@ module rmsnorm_engine (
         end else if (state == S_P1_ACCUM) begin
             // Accumulate x[i]^2 treating x as signed: |x|^2 = x*x (always positive)
             // sram_rd0_data is int8, cast to signed then square
-            r_sum_sq <= r_sum_sq + 32'(sq_val);
+            r_sum_sq <= r_sum_sq + 32'(sq_val);//accumulate
         end
     end
 
@@ -181,7 +183,7 @@ module rmsnorm_engine (
             div_quotient  <= '0;
         end else if (state == S_P1_ACCUM && state_nxt == S_P1_DIVIDE) begin
             // Initialize division: sum_sq << 8 to get Q8.8 result alignment
-            div_remainder <= 48'(r_sum_sq + 32'(sq_val)) << 8;
+            div_remainder <= 48'(r_sum_sq + 32'(sq_val)) << 8;//last sum number:r_sum_sq+sq_val
             div_quotient  <= '0;
             div_count     <= 6'd32;
         end else if (state == S_P1_DIVIDE && div_count > 6'd0) begin
@@ -241,7 +243,7 @@ module rmsnorm_engine (
 
     // Pipeline registers for pass 2 data
     always_ff @(posedge clk) begin
-        if (state == S_P2_READ) begin
+        if (state == S_P2_LATCH) begin
             p_input <= signed'(sram_rd0_data);
             p_gamma <= signed'(sram_rd1_data);
         end

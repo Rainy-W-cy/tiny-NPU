@@ -154,7 +154,7 @@ module gelu_engine (
     // LUT address - driven during S_LUT_WAIT (data available from SRAM)
     // The LUT output will be ready in S_LUT_READ
     // ----------------------------------------------------------------
-    assign lut_addr = (state == S_LUT_WAIT) ? sram_rd_data : p_rd_data;
+    assign lut_addr = (state == S_LUT_WAIT) ? sram_rd_data : p_rd_data;//maintain one cycle,S_LUT_WAIT and S_LUT_READ are same lut_addr
 
     // ----------------------------------------------------------------
     // SRAM write - during S_WRITE, LUT output is stable

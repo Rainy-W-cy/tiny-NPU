@@ -1,5 +1,6 @@
 // =============================================================================
 // exp_lut.sv - Exponential approximation via 256-entry ROM lookup table
+// [-4,0] 为实际的表项范围，为了将[-128, 0]与[-4,0]映射，所以设置的步长为1/32
 // Input:  x[7:0] signed (representing x - max, so always <= 0 in [-128, 0])
 // Output: exp_out[15:0] unsigned Q8.8 fixed-point
 //         exp(0) = 256, exp(-1) ~ 248, exp(-128) ~ 0

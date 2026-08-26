@@ -23,7 +23,7 @@ module rsqrt_lut (
     // ----------------------------------------------------------------
     // ROM initialization
     // rsqrt_lut[i] = round(65536 / sqrt(i * 256))
-    // = round(65536 / (16 * sqrt(i)))
+    // = round(65536 / (16 * sqrt(i)))//满足0.16才全部乘65535，后面的i*256是为了找entry的值，用区间的起点
     // = round(4096 / sqrt(i))
     // i=0 -> special: max value (65535)
     // i=1 -> 4096/1 = 4096

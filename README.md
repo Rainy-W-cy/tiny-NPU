@@ -442,30 +442,74 @@ python python/tools/mistral_gen_weights_hf.py --outdir sim/verilator/build/mistr
 sim/verilator/build/llama_demo_infer --datadir sim/verilator/build/mistral_data_hf
 ```
 ### Qwen
-```bash
-# Activate env
-source sim/verilator/setup_env.sh
 
-# Build verilator env and build Qwen target
+Qwen 软件链分为四个可独立执行的阶段：
+
+- `weights`：下载、裁剪、量化并打包 `weights.bin`
+- `golden`：处理 prompt，运行 Python golden 并生成 golden 工件
+- `build`：配置并编译 `qwen_demo_infer`
+- `infer`：运行 NPU 推理，并将 `npu_tokens.txt` 转换为 `npu_text.txt`
+
+推荐使用分阶段 Shell 入口。默认会复用已有 `weights.bin`，仅在权重不存在时自动执行 `weights`，随后执行 `golden`、`build` 和 `infer`：
+
+```bash
+# Build env
+source sim/verilator/setup_env.sh
+# Default: reuse weights, regenerate prompt/golden, build and run full-recompute
+sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10
+
+# Run Prefill + Decode with KV Cache
+sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 --kv-cache
+
+# Explicit first-time full flow, including weight generation
+sim/verilator/run_qwen_demo.sh \
+  --stages weights,golden,build,infer \
+  --prompt "Hello" --max-tokens 10 --kv-cache
+
+# Regenerate prompt and golden without rebuilding or running RTL
+sim/verilator/run_qwen_demo.sh \
+  --stages golden \
+  --prompt "Hello" --max-tokens 10
+
+# Rebuild and run NPU using existing weights and prompt_tokens.txt
+sim/verilator/run_qwen_demo.sh \
+  --stages build,infer \
+  --max-tokens 10 --kv-cache
+
+# Run NPU only using the existing executable and input artifacts
+sim/verilator/run_qwen_demo.sh \
+  --stages infer \
+  --max-tokens 10 --kv-cache
+```
+
+未选择 `golden` 阶段时，`--prompt` 和 `--prompt-ids` 不会重新生成 `prompt_tokens.txt`，`infer` 将使用已有的 token 文件。`--skip-python` 作为兼容参数保留，等价于跳过 `weights` 和 `golden` 阶段。
+
+也可以手动依次执行相同流程：
+
+```bash
+# Build env
+source sim/verilator/setup_env.sh
+# Build Verilator target
 ./.venv/bin/cmake -S sim/verilator -B sim/verilator/build
 ./.venv/bin/cmake --build sim/verilator/build --target qwen_demo_infer -j1
 
-# Export, quantize and pack Qwen weights
-./.venv/bin/python python/tools/qwen_gen_weights_hf.py   --outdir sim/verilator/build/qwen_data_hf
+# Generate weights once
+./.venv/bin/python python/tools/qwen_gen_weights_hf.py \
+  --outdir sim/verilator/build/qwen_data_hf
 
-# Generate prompt / golden / text outputs
-./.venv/bin/python python/golden/qwen_infer_golden.py   --prompt "Hello"   --max-tokens 10   --temperature 0.0   --seed 42   --outdir sim/verilator/build/qwen_data_hf
+# Generate prompt and golden artifacts
+./.venv/bin/python python/golden/qwen_infer_golden.py \
+  --prompt "Hello" --max-tokens 10 --temperature 0.0 --seed 42 \
+  --outdir sim/verilator/build/qwen_data_hf
 
-# Run full-recompute path
-sim/verilator/build/qwen_demo_infer   --datadir sim/verilator/build/qwen_data_hf   --max-tokens 10
+# Run Prefill + Decode; remove --kv-cache for full-recompute
+sim/verilator/build/qwen_demo_infer \
+  --datadir sim/verilator/build/qwen_data_hf \
+  --max-tokens 10 --kv-cache
 
-# Run prefill + decode (KV-cache) path
-sim/verilator/build/qwen_demo_infer   --datadir sim/verilator/build/qwen_data_hf   --max-tokens 10   --kv-cache 2>&1 | tee sim/verilator/build/qwen_data_hf/qwen_hardware.log
-
-# One-shot shell entry
-sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 --skip-python #no python
-sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 
-sim/verilator/run_qwen_demo.sh --prompt "Hello" --max-tokens 10 --kv-cache
+# Convert NPU token IDs to text and write npu_text.txt
+./.venv/bin/python python/tools/qwen_npu_postprocess.py \
+  --datadir sim/verilator/build/qwen_data_hf
 ```
 
 Qwen 当前已经具备两条 C++ 仿真路径：
@@ -478,6 +522,9 @@ Qwen 当前已经具备两条 C++ 仿真路径：
 - `python/tools/qwen_gen_weights_hf.py` 只负责权重导出、裁剪、量化和打包
 - `python/golden/qwen_infer_golden.py` 负责文本前处理、golden 推理和输出工件
 - `sim/verilator/tb_qwen_demo_infer.cpp` 是 Qwen 独立 C++ 仿真入口
+- `python/tools/qwen_npu_postprocess.py` 负责将 `npu_tokens.txt` 转换并保存为 `npu_text.txt`
+
+`npu_text.txt` 与 `golden_text.txt` 的口径一致，均保存 prompt 与对应生成 token 解码后的完整文本。
 
 ## ONNX Graph Mode
 

@@ -37,6 +37,7 @@ double sc_time_stamp() { return main_time; }
 static Vllama_block_top* dut;
 static VerilatedVcdC*    tfp;
 static int               tc = 0;
+static uint64_t          dut_cycle_count = 0;
 
 // =============================================================================
 // 模型静态配置（必须与 python/tools/llama_map.py 保持一致）
@@ -222,6 +223,7 @@ void tick() {
     if (tfp) tfp->dump(tc * 10 + 5);
     tc++;
     main_time = tc;
+    dut_cycle_count++;
 }
 
 void reset_dut(int cycles = 10) {
@@ -1042,7 +1044,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
 
             // 把当前 head 的 [S, HEAD_DIM] 结果拷贝到大矩阵 ATTN 的对应列块中。
             encode_instr(OP_VEC, FLAG_COPY2D, ADDR_ATTN + h * HEAD_DIM, ADDR_ATTN_H, 0,
-                         S, HEAD_DIM, HEAD_DIM, HIDDEN, hi, lo);
+                         S, HEAD_DIM, HEAD_DIM, HIDDEN, hi, lo);//dst addr and dst stride decide final dst_addr
             ucode_write(addr++, hi, lo);
             encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
             ucode_write(addr++, hi, lo);
@@ -1420,15 +1422,20 @@ int gen_lm_head_microcode(int ucode_addr) {
 }
 
 // =============================================================================
-// Run NPU program until program_end, handling DMA shim
-// Returns cycle count, or -1 on timeout
+// Start one NPU program and run until program_end, handling the DMA shim.
+// The returned count covers every DUT cycle from start_pulse through program_end,
+// including cycles advanced by host-side DMA SRAM accesses.
 // =============================================================================
-int run_until_done(int max_cycles = 4000000) {
-    int cycle = 0;
-    while (cycle < max_cycles) {
+int64_t start_and_run_until_done(uint64_t max_cycles = 4000000) {
+    uint64_t start_cycle = dut_cycle_count;
+
+    dut->start_pulse = 1;
+    tick();
+    dut->start_pulse = 0;
+
+    while (dut_cycle_count - start_cycle < max_cycles) {
         // 每一拍都推进 DUT。
         tick();
-        cycle++;
 
         // 一旦 RTL 捕获到 DMA 命令，就由 C++ testbench 代为执行，并手动回一个 done 脉冲。
         if (dut->dma_cmd_captured) {
@@ -1436,14 +1443,15 @@ int run_until_done(int max_cycles = 4000000) {
             handle_dma_command();
             //告诉rtl清除dma active状态
             dut->dma_done_pulse = 1;
-            tick(); cycle++;
+            tick();
             dut->dma_done_pulse = 0;
         }
 
         // program_end 拉高表示当前微码程序执行完成。
         if (dut->program_end) {
+            uint64_t program_cycles = dut_cycle_count - start_cycle;
             for (int i = 0; i < 10; i++) tick();
-            return cycle;
+            return static_cast<int64_t>(program_cycles);
         }
     }
     // 超时返回 -1，由上层决定如何报错并退出。
@@ -1771,14 +1779,17 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "============================================" << std::endl;
-    std::cout << "  QWEN INFERENCE DEMO (NPU Hardware)" << std::endl;
-    std::cout << "  layers=" << N_LAYERS << " hidden=" << HIDDEN
+    std::cout << "QWEN INFERENCE DEMO (NPU Hardware)" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "Mode              : "
+              << (use_kv_cache ? "Prefill + Decode" : "Full Recompute") << std::endl;
+    std::cout << "Model config      : layers=" << N_LAYERS << " hidden=" << HIDDEN
               << " ffn=" << FFN_DIM << " vocab=" << VOCAB_SIZE << std::endl;
-    std::cout << "  q_heads=" << N_Q_HEADS << " kv_heads=" << N_KV_HEADS
-              << " gqa_ratio=" << GQA_RATIO << " head_dim=" << HEAD_DIM << std::endl;
-    std::cout << "  max_new_tokens=" << max_new_tokens
-              << (use_kv_cache ? " (prefill+decode)" : " (full-recompute)") << std::endl;
-    std::cout << "  datadir=" << datadir << std::endl;
+    std::cout << "Attention config  : q_heads=" << N_Q_HEADS << " kv_heads=" << N_KV_HEADS
+              << " head_dim=" << HEAD_DIM << " gqa_ratio=" << GQA_RATIO << std::endl;
+    std::cout << "Max new tokens    : " << max_new_tokens << std::endl;
+    std::cout << "Max sequence      : " << MAX_SEQ << std::endl;
+    std::cout << "Data directory    : " << datadir << std::endl;
     std::cout << "============================================" << std::endl;
 
     // 预先构造 host 侧参考实现所需的查找表。
@@ -1798,7 +1809,9 @@ int main(int argc, char** argv) {
         std::cerr << "ERROR: No prompt tokens loaded" << std::endl;
         return 1;
     }
-    std::cout << "Prompt tokens (" << tokens.size() << "): ";
+    const int prompt_length = static_cast<int>(tokens.size());
+    std::cout << "Prompt length     : " << prompt_length << " tokens" << std::endl;
+    std::cout << "Prompt tokens     : ";
     for (int t : tokens) std::cout << t << " ";
     std::cout << std::endl;
 
@@ -1846,9 +1859,15 @@ int main(int argc, char** argv) {
     // Inference
     // ==========================================================================
     std::vector<int> generated_tokens;
-    int total_npu_cycles = 0;
+    uint64_t total_npu_cycles = 0;
+    uint64_t prefill_npu_cycles = 0;
+    std::vector<uint64_t> decode_npu_cycles;
+    std::vector<uint64_t> full_recompute_npu_cycles;
     bool logits_exact = true;
     int max_logit_err_all = 0;
+
+    std::cout << std::endl;
+    std::cout << "---------------- INFERENCE -----------------" << std::endl;
 
     if (use_kv_cache) {
         // ======================================================================
@@ -1864,6 +1883,7 @@ int main(int argc, char** argv) {
                           << ", stopping" << std::endl;
                 break;
             }
+            uint64_t step_npu_cycles = 0;
 
             // 保存当前 step 最后一个可见位置的 hidden state，
             // 统一供 LN_F + lm_head 使用。
@@ -1895,18 +1915,14 @@ int main(int argc, char** argv) {
                     int num_instrs = gen_qwen_prefill_block_microcode(S, blk, 0);
 
                     dut->ucode_len = num_instrs;
-                    dut->start_pulse = 1;
-                    tick();
-                    dut->start_pulse = 0;
-
-                    int cycles = run_until_done();
+                    int64_t cycles = start_and_run_until_done();
                     if (cycles < 0) {
                         std::cerr << "TIMEOUT in prefill block " << blk << " step " << step << std::endl;
                         if (tfp) tfp->close();
                         delete dut;
                         return 1;
                     }
-                    total_npu_cycles += cycles;
+                    step_npu_cycles += static_cast<uint64_t>(cycles);
 
                     if (NPU_DUMP) {
                         std::cout << "  Prefill block " << blk << ": " << cycles << " cycles" << std::endl;
@@ -1951,18 +1967,14 @@ int main(int argc, char** argv) {
                     int num_instrs = gen_qwen_decode_block_microcode(T, blk, 0);
 
                     dut->ucode_len = num_instrs;
-                    dut->start_pulse = 1;
-                    tick();
-                    dut->start_pulse = 0;
-
-                    int cycles = run_until_done();
+                    int64_t cycles = start_and_run_until_done();
                     if (cycles < 0) {
                         std::cerr << "TIMEOUT in decode block " << blk << " step " << step << std::endl;
                         if (tfp) tfp->close();
                         delete dut;
                         return 1;
                     }
-                    total_npu_cycles += cycles;
+                    step_npu_cycles += static_cast<uint64_t>(cycles);
 
                     if (NPU_DUMP) {
                         std::cout << "  Decode block " << blk << ": " << cycles << " cycles" << std::endl;
@@ -1987,18 +1999,14 @@ int main(int argc, char** argv) {
             //最后一级RMSNorm
             int ln_instrs = gen_ln_f_microcode(0);
             dut->ucode_len = ln_instrs;
-            dut->start_pulse = 1;
-            tick();
-            dut->start_pulse = 0;
-
-            int ln_cycles = run_until_done();
+            int64_t ln_cycles = start_and_run_until_done();
             if (ln_cycles < 0) {
                 std::cerr << "TIMEOUT in LN_F step " << step << std::endl;
                 if (tfp) tfp->close();
                 delete dut;
                 return 1;
             }
-            total_npu_cycles += ln_cycles;
+            step_npu_cycles += static_cast<uint64_t>(ln_cycles);
 
             int8_t ln_f_out[HIDDEN];
             for (int j = 0; j < HIDDEN; j++)
@@ -2014,18 +2022,14 @@ int main(int argc, char** argv) {
 
             int lm_instrs = gen_lm_head_microcode(0);
             dut->ucode_len = lm_instrs;
-            dut->start_pulse = 1;
-            tick();
-            dut->start_pulse = 0;
-
-            int lm_cycles = run_until_done();
+            int64_t lm_cycles = start_and_run_until_done();
             if (lm_cycles < 0) {
                 std::cerr << "TIMEOUT in lm_head step " << step << std::endl;
                 if (tfp) tfp->close();
                 delete dut;
                 return 1;
             }
-            total_npu_cycles += lm_cycles;
+            step_npu_cycles += static_cast<uint64_t>(lm_cycles);
 
             // 读回整个词表的 logits。
             int8_t logits[VOCAB_SIZE];
@@ -2077,13 +2081,22 @@ int main(int argc, char** argv) {
                 if (err > rms_f_max_err) rms_f_max_err = err;
             }
 
-            std::cout << "  Step " << std::setw(2) << step
-                      << ": npu_tok=" << std::setw(3) << next_tok
+            total_npu_cycles += step_npu_cycles;
+            if (step == 0)
+                prefill_npu_cycles = step_npu_cycles;
+            else
+                decode_npu_cycles.push_back(step_npu_cycles);
+
+            std::cout << std::endl;
+            std::cout << "Step " << step
+                      << (step == 0 ? " [PREFILL]" : " [DECODE ]")
+                      << " context=" << S
+                      << " cycles=" << step_npu_cycles << std::endl;
+            std::cout << "  token: npu=" << std::setw(3) << next_tok
                       << " gold_tok=" << std::setw(3) << gold_tok
                       << " logit_max_err=" << logit_max_err
                       << (logit_max_err == 0 ? " EXACT" : " DRIFT")
                       << " rms_f_err=" << rms_f_max_err
-                      << (step == 0 ? " [prefill]" : " [decode]")
                       << std::endl;
 
             if (NPU_DUMP) {
@@ -2119,6 +2132,7 @@ int main(int argc, char** argv) {
                       << ", stopping" << std::endl;
             break;
         }
+        uint64_t step_npu_cycles = 0;
 
         if (NPU_DUMP) {
             std::cout << "\n--- Decode step " << step << " (seq_len=" << S
@@ -2140,18 +2154,15 @@ int main(int argc, char** argv) {
             //生成指令并通过ucode_write写到dut的ucode sram中
             int num_instrs = gen_block_microcode(S, 0);
             dut->ucode_len = num_instrs;
-            dut->start_pulse = 1;
-            tick();
-            dut->start_pulse = 0;
             //驱动并等待本层结束
-            int cycles = run_until_done();
+            int64_t cycles = start_and_run_until_done();
             if (cycles < 0) {
                 std::cerr << "TIMEOUT in block " << blk << " step " << step << std::endl;
                 if (tfp) tfp->close();
                 delete dut;
                 return 1;
             }
-            total_npu_cycles += cycles;
+            step_npu_cycles += static_cast<uint64_t>(cycles);
 
             if (NPU_DUMP) {
                 std::cout << "  Block " << blk << ": " << cycles << " cycles" << std::endl;
@@ -2176,18 +2187,14 @@ int main(int argc, char** argv) {
         // Run RMSNorm microcode
         int ln_instrs = gen_ln_f_microcode(0);
         dut->ucode_len = ln_instrs;
-        dut->start_pulse = 1;
-        tick();
-        dut->start_pulse = 0;
-
-        int ln_cycles = run_until_done();
+        int64_t ln_cycles = start_and_run_until_done();
         if (ln_cycles < 0) {
             std::cerr << "TIMEOUT in LN_F step " << step << std::endl;
             if (tfp) tfp->close();
             delete dut;
             return 1;
         }
-        total_npu_cycles += ln_cycles;
+        step_npu_cycles += static_cast<uint64_t>(ln_cycles);
 
         // Read RMSNorm output (in-place at ADDR_LM_INPUT)
         int8_t ln_f_out[HIDDEN];
@@ -2210,18 +2217,14 @@ int main(int argc, char** argv) {
         // Run lm_head microcode
         int lm_instrs = gen_lm_head_microcode(0);
         dut->ucode_len = lm_instrs;
-        dut->start_pulse = 1;
-        tick();
-        dut->start_pulse = 0;
-
-        int lm_cycles = run_until_done();
+        int64_t lm_cycles = start_and_run_until_done();
         if (lm_cycles < 0) {
             std::cerr << "TIMEOUT in lm_head step " << step << std::endl;
             if (tfp) tfp->close();
             delete dut;
             return 1;
         }
-        total_npu_cycles += lm_cycles;
+        step_npu_cycles += static_cast<uint64_t>(lm_cycles);
 
         // 5. 读回 logits，并以 greedy（贪心算法取最大值） 方式选下一个 token。
         int8_t logits[VOCAB_SIZE];
@@ -2275,8 +2278,14 @@ int main(int argc, char** argv) {
             if (err > rms_f_max_err) rms_f_max_err = err;
         }
 
-        std::cout << "  Step " << std::setw(2) << step
-                  << ": npu_tok=" << std::setw(3) << next_tok
+        total_npu_cycles += step_npu_cycles;
+        full_recompute_npu_cycles.push_back(step_npu_cycles);
+
+        std::cout << std::endl;
+        std::cout << "Step " << step
+                  << " [FULL] context=" << S
+                  << " cycles=" << step_npu_cycles << std::endl;
+        std::cout << "  token: npu=" << std::setw(3) << next_tok
                   << " gold_tok=" << std::setw(3) << gold_tok
                   << " logit_max_err=" << logit_max_err
                   << (logit_max_err == 0 ? " EXACT" : " DRIFT")
@@ -2309,34 +2318,93 @@ int main(int argc, char** argv) {
     // ==========================================================================
     // Summary
     // ==========================================================================
-    std::cout << std::endl;
-    std::cout << "============================================" << std::endl;
-    std::cout << "  INFERENCE COMPLETE" << std::endl;
-    std::cout << "  Generated " << generated_tokens.size() << " tokens" << std::endl;
-    std::cout << "  Token IDs: ";
-    for (int t : generated_tokens) std::cout << t << " ";
-    std::cout << std::endl;
-    std::cout << "  NPU vs C++ golden logits: max_err=" << max_logit_err_all
-              << (logits_exact ? " (BIT-EXACT)" : " (DRIFT)") << std::endl;
-
-    // Compare with Python golden (informational)
+    int py_mismatches = 0;
+    int py_compare_len = 0;
     if (have_golden) {
-        int py_mismatches = 0;
-        int compare_len = std::min((int)generated_tokens.size(), (int)golden_tokens.size());
-        for (int i = 0; i < compare_len; i++) {
+        py_compare_len = std::min((int)generated_tokens.size(), (int)golden_tokens.size());
+        for (int i = 0; i < py_compare_len; i++) {
             if (generated_tokens[i] != golden_tokens[i]) py_mismatches++;
         }
-        std::cout << "  NPU vs Python golden tokens: " << py_mismatches << "/" << compare_len
-                  << " mismatches (informational)" << std::endl;
     }
 
-    std::cout << "  Total NPU cycles: " << total_npu_cycles << std::endl;
-    std::cout << "============================================" << std::endl;
+    std::cout << std::endl;
+    std::cout << "--------------- CYCLE SUMMARY ---------------" << std::endl;
+
+    if (use_kv_cache) {
+        std::cout << std::endl;
+        std::cout << "Prefill:" << std::endl;
+        std::cout << "  Context length       : " << prompt_length << std::endl;
+        std::cout << "  Output tokens        : " << (prefill_npu_cycles > 0 ? 1 : 0) << std::endl;
+        std::cout << "  NPU cycles           : " << prefill_npu_cycles << std::endl;
+
+        std::cout << std::endl;
+        std::cout << "Decode:" << std::endl;
+        std::cout << "  Output tokens        : " << decode_npu_cycles.size() << std::endl;
+        if (!decode_npu_cycles.empty()) {
+            uint64_t decode_total_cycles = 0;
+            for (uint64_t cycles : decode_npu_cycles) decode_total_cycles += cycles;
+            auto decode_minmax = std::minmax_element(decode_npu_cycles.begin(),
+                                                     decode_npu_cycles.end());
+
+            std::cout << "  Context range        : " << prompt_length + 1 << " - "
+                      << prompt_length + (int)decode_npu_cycles.size() << std::endl;
+            std::cout << "  Per-token cycles     : ";
+            for (uint64_t cycles : decode_npu_cycles) std::cout << cycles << " ";
+            std::cout << std::endl;
+            std::cout << "  Total cycles         : " << decode_total_cycles << std::endl;
+            std::cout << "  Average cycles/token : " << std::fixed << std::setprecision(1)
+                      << static_cast<double>(decode_total_cycles) / decode_npu_cycles.size()
+                      << std::defaultfloat << std::endl;
+            std::cout << "  Minimum cycles/token : " << *decode_minmax.first << std::endl;
+            std::cout << "  Maximum cycles/token : " << *decode_minmax.second << std::endl;
+        }
+    } else {
+        std::cout << std::endl;
+        std::cout << "Full Recompute:" << std::endl;
+        std::cout << "  Output tokens        : " << full_recompute_npu_cycles.size() << std::endl;
+        if (!full_recompute_npu_cycles.empty()) {
+            uint64_t full_total_cycles = 0;
+            for (uint64_t cycles : full_recompute_npu_cycles) full_total_cycles += cycles;
+            auto full_minmax = std::minmax_element(full_recompute_npu_cycles.begin(),
+                                                   full_recompute_npu_cycles.end());
+
+            std::cout << "  Context range        : " << prompt_length << " - "
+                      << prompt_length + (int)full_recompute_npu_cycles.size() - 1 << std::endl;
+            std::cout << "  Per-token cycles     : ";
+            for (uint64_t cycles : full_recompute_npu_cycles) std::cout << cycles << " ";
+            std::cout << std::endl;
+            std::cout << "  Total cycles         : " << full_total_cycles << std::endl;
+            std::cout << "  Average cycles/token : " << std::fixed << std::setprecision(1)
+                      << static_cast<double>(full_total_cycles) / full_recompute_npu_cycles.size()
+                      << std::defaultfloat << std::endl;
+            std::cout << "  Minimum cycles/token : " << *full_minmax.first << std::endl;
+            std::cout << "  Maximum cycles/token : " << *full_minmax.second << std::endl;
+        }
+    }
+
+    std::cout << std::endl;
+    std::cout << "Overall:" << std::endl;
+    std::cout << "  Generated tokens     : " << generated_tokens.size() << std::endl;
+    std::cout << "  Total NPU cycles     : " << total_npu_cycles << std::endl;
+    std::cout << "  Token IDs            : ";
+    for (int t : generated_tokens) std::cout << t << " ";
+    std::cout << std::endl;
+
+    std::cout << std::endl;
+    std::cout << "--------------- CHECK SUMMARY ---------------" << std::endl;
+    std::cout << "LM Head C++ reference : max_err=" << max_logit_err_all
+              << (logits_exact ? " BIT-EXACT" : " DRIFT") << std::endl;
+    if (have_golden) {
+        std::cout << "Python golden tokens  : " << py_mismatches << "/" << py_compare_len
+                  << " mismatches (informational)" << std::endl;
+    } else {
+        std::cout << "Python golden tokens  : comparison skipped" << std::endl;
+    }
 
     // Pass criterion: logits must be bit-exact with C++ follow-actual golden
     //pass依据
     bool pass = logits_exact;
-    std::cout << "  QWEN DEMO: " << (pass ? "PASS" : "FAIL") << std::endl;
+    std::cout << "QWEN DEMO             : " << (pass ? "PASS" : "FAIL") << std::endl;
     std::cout << "============================================" << std::endl;
 
     // Save generated tokens

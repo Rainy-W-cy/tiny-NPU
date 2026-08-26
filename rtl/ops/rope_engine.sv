@@ -7,8 +7,11 @@
 //   q_rot[2i]   = (q[2i]*cos[p,i] - q[2i+1]*sin[p,i]) >> 7
 //   q_rot[2i+1] = (q[2i]*sin[p,i] + q[2i+1]*cos[p,i]) >> 7
 //
-// 4 cycles per dimension pair: RD_EVEN -> RD_ODD -> WR_EVEN -> WR_ODD
-// Total cycles: 4 * (HEAD_DIM/2) * num_rows
+// 5 body cycles per dimension pair:
+// RD_EVEN -> RD_ODD -> LATCH_ODD -> WR_EVEN -> WR_ODD
+
+// Pair-processing cycles:
+// 5 * (HEAD_DIM/2) * num_rows
 // =============================================================================
 import npu_pkg::*;
 import fixed_pkg::*;
@@ -55,6 +58,7 @@ module rope_engine (
         S_IDLE,
         S_RD_EVEN,    // Read q[row, 2i] from SRAM0, cos[pos, i] from SRAM1
         S_RD_ODD,     // Read q[row, 2i+1] from SRAM0, sin[pos, i] from SRAM1
+        S_LATCH_ODD,  // Latch ODD ，next cycle compute
         S_WR_EVEN,    // Compute and write q_rot[2i]
         S_WR_ODD,     // Compute and write q_rot[2i+1], advance
         S_DONE
@@ -95,15 +99,16 @@ module rope_engine (
 
     logic last_pair;
     logic last_row;
-    assign last_pair = (r_pair == r_half_dim - 16'd1);
-    assign last_row  = (r_row == r_num_rows - 16'd1);
+    assign last_pair = (r_pair == r_half_dim - 16'd1);//for one row in hidden dim
+    assign last_row  = (r_row == r_num_rows - 16'd1);//for Q or K in all row
 
     always_comb begin
         state_nxt = state;
         case (state)
             S_IDLE:     if (cmd_valid) state_nxt = S_RD_EVEN;
-            S_RD_EVEN:  state_nxt = S_RD_ODD;
-            S_RD_ODD:   state_nxt = S_WR_EVEN;
+            S_RD_EVEN:  state_nxt = S_RD_ODD;//0 2 4
+            S_RD_ODD:   state_nxt = S_LATCH_ODD;//1 3 5
+            S_LATCH_ODD: state_nxt = S_WR_EVEN;
             S_WR_EVEN:  state_nxt = S_WR_ODD;
             S_WR_ODD: begin
                 if (last_pair && last_row)
@@ -137,7 +142,7 @@ module rope_engine (
             r_pos_offset <= pos_offset;
             r_sin_base   <= sin_base;
             r_cos_base   <= cos_base;
-            r_half_dim   <= head_dim >> 1;
+            r_half_dim   <= head_dim >> 1;//head_dim/2
         end
     end
 
@@ -169,11 +174,14 @@ module rope_engine (
     logic [15:0] cos_addr, sin_addr;
     logic [15:0] pos_idx;     // actual position = row + pos_offset
 
-    assign pos_idx       = r_row + r_pos_offset;
-    assign src_even_addr = r_src_base + r_row * r_head_dim + (r_pair << 1);
+    assign pos_idx       = r_row + r_pos_offset;//parameter sin and cos, offset support decode initial r_row isn't 0
+
+    assign src_even_addr = r_src_base + r_row * r_head_dim + (r_pair << 1);//r_pair<<1 ->0 2 4 6 8
     assign src_odd_addr  = r_src_base + r_row * r_head_dim + (r_pair << 1) + 16'd1;
+
     assign dst_even_addr = r_dst_base + r_row * r_head_dim + (r_pair << 1);
     assign dst_odd_addr  = r_dst_base + r_row * r_head_dim + (r_pair << 1) + 16'd1;
+
     assign cos_addr      = r_cos_base + pos_idx * r_half_dim + r_pair;
     assign sin_addr      = r_sin_base + pos_idx * r_half_dim + r_pair;
 
@@ -208,7 +216,7 @@ module rope_engine (
             r_even_val <= signed'(sram_rd0_data);
             r_cos_val  <= signed'(sram_rd1_data);
         end
-        if (state == S_WR_EVEN) begin
+        if (state == S_LATCH_ODD) begin
             // By now SRAM0/SRAM1 data from RD_ODD is available
             r_odd_val <= signed'(sram_rd0_data);
             r_sin_val <= signed'(sram_rd1_data);
@@ -243,7 +251,7 @@ module rope_engine (
     // ----------------------------------------------------------------
     assign sram_wr_en   = (state == S_WR_EVEN) || (state == S_WR_ODD);
     assign sram_wr_addr = (state == S_WR_EVEN) ? dst_even_addr : dst_odd_addr;
-    assign sram_wr_data = (state == S_WR_EVEN) ? rot_even_clamp : rot_odd_clamp;
+    assign sram_wr_data = (state == S_WR_EVEN) ? rot_even_clamp : rot_odd_clamp;//even or odd
 
     // ----------------------------------------------------------------
     // Status and handshake
