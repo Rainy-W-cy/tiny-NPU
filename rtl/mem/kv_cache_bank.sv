@@ -137,7 +137,7 @@ module kv_cache_bank
 
             S_READ_START: begin
                 rd_en   = 1'b1;
-                rd_addr = calc_addr(read_layer, read_head, read_time_start, read_is_v);
+                rd_addr = calc_addr(read_layer, read_head, read_time_start, read_is_v);//now,read_time_start is increment in kv_ctrl
                 state_next = S_READ_STREAM;
             end
 

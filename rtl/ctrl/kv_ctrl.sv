@@ -160,7 +160,7 @@ module kv_ctrl
         end else begin
             rd_pipe_valid <= sram_rd_en && (state == KV_APPEND_RD);//align sram 1 cycle delay 
             if (sram_rd_en && (state == KV_APPEND_RD))
-                pack_idx <= byte_cnt;
+                pack_idx <= byte_cnt;//
         end
     end
 

@@ -25,8 +25,7 @@ module sram_dp #(
 
     (* ram_style = "block" *) logic [WIDTH-1:0] mem [0:DEPTH-1];
 
-    // Combined sequential process keeps VCS happy while preserving
-    // write-first behavior on both ports.
+    // Port A: write-first
     always_ff @(posedge clk) begin
         if (en_a) begin
             if (we_a) begin
@@ -36,7 +35,10 @@ module sram_dp #(
                 dout_a <= mem[addr_a];
             end
         end
+    end
 
+    // Port B: write-first
+    always_ff @(posedge clk) begin
         if (en_b) begin
             if (we_b) begin
                 mem[addr_b] <= din_b;
