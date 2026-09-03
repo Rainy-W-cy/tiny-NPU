@@ -909,7 +909,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     uint64_t hi, lo;
     int addr = ucode_addr;
 
-    // 第一步：对输入序列的每一行做 RMSNorm，输出到 RMS1_OUT。
+    // 第一步：对输入序列的每一行做 RMSNorm，输出到 RMS1_OUT。S+1 num ucode
     for (int i = 0; i < S; i++) {
         uint16_t src = ADDR_X + i * HIDDEN;
         uint16_t dst = ADDR_RMS1_OUT + i * HIDDEN;
@@ -926,14 +926,14 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
         uint16_t wk_h_addr = ADDR_WK + kv_h * HIDDEN * HEAD_DIM;
         uint16_t wv_h_addr = ADDR_WV + kv_h * HIDDEN * HEAD_DIM;
 
-        // 先算这一组共享的 K。
+        // 先算这一组共享的 K。 1 ucode
         encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_K_H, ADDR_RMS1_OUT, wk_h_addr,
                      S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
         ucode_write(addr++, hi, lo);
         encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
         ucode_write(addr++, hi, lo);
 
-        // 如果当前权重包含 bias，则把复制到 SRAM1 的 K bias 加回 K 向量。
+        // 如果当前权重包含 bias，则把复制到 SRAM1 的 K bias 加回 K 向量。2 ucode
         if (has_qkv_bias) {
             uint16_t bk_sram1 = S1_BIAS_K + kv_h * S * HEAD_DIM;
             encode_instr(OP_VEC, 0x00, ADDR_K_H, ADDR_K_H, bk_sram1,
@@ -943,14 +943,14 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
         }
 
-        // 再算这一组共享的 V。
+        // 再算这一组共享的 V。2 ucode
         encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_V_H, ADDR_RMS1_OUT, wv_h_addr,
                      S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
         ucode_write(addr++, hi, lo);
         encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
         ucode_write(addr++, hi, lo);
 
-        // 如果当前权重包含 bias，则把复制到 SRAM1 的 V bias 加回 V 向量。
+        // 如果当前权重包含 bias，则把复制到 SRAM1 的 V bias 加回 V 向量。 2 ucode
         if (has_qkv_bias) {
             uint16_t bv_sram1 = S1_BIAS_V + kv_h * S * HEAD_DIM;
             encode_instr(OP_VEC, 0x00, ADDR_V_H, ADDR_V_H, bv_sram1,
@@ -960,7 +960,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
         }
 
-        // K 需要做 RoPE，位置偏移从序列起点 0 开始。
+        // K 需要做 RoPE，位置偏移从序列起点 0 开始。2 ucode
         encode_instr(OP_ROPE, 0, ADDR_K_H, ADDR_K_H, S1_ROPE_SIN,
                      S, HEAD_DIM, 0, S1_ROPE_COS, hi, lo);
         ucode_write(addr++, hi, lo);
@@ -968,8 +968,9 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
         ucode_write(addr++, hi, lo);
 
         // 把这一组所有 token 的 K 逐行从sram0 append 到硬件 KV cache。
-        //这里是对PD路径特有的需要写到kv cache，这里多了block idx参数，保证写入kv时做好分层
+        //这里是对PD路径特有的需要写到kv cache，这里多了block idx(layer id)参数，保证写入kv时做好分层
         //cache要分好head和layer以及token还有k/v
+        //S +1 num ucode
         for (int i = 0; i < S; i++) {
             encode_instr(OP_KV_APPEND, 0x00, 0, ADDR_K_H + i * HEAD_DIM, 0,
                          blk_idx, HEAD_DIM, i, kv_h, hi, lo);
@@ -980,6 +981,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
 
         // 把这一组所有 token 的 V 逐行 append 到硬件 KV cache。
         //PD路径特有的写到kv cache
+        //S +1 ucode
         for (int i = 0; i < S; i++) {
             encode_instr(OP_KV_APPEND, 0x01, 0, ADDR_V_H + i * HEAD_DIM, 0,
                          blk_idx, HEAD_DIM, i, kv_h, hi, lo);
@@ -987,13 +989,15 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
         }
         encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
         ucode_write(addr++, hi, lo);
-
+        
         // 对共享这一组 KV 的每个 Q head 分别做 attention。
+        //
         for (int qg = 0; qg < GQA_RATIO; qg++) {
             int h = kv_h * GQA_RATIO + qg;
             uint16_t wq_h_addr = ADDR_WQ + h * HIDDEN * HEAD_DIM;
 
             // 当前 Q head 的 Q 投影。
+            //2 ucode 
             encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_Q_H, ADDR_RMS1_OUT, wq_h_addr,
                          S, HEAD_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
             ucode_write(addr++, hi, lo);
@@ -1001,6 +1005,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
 
             // 若存在 bias，则补上 Q bias。
+            //2 ucode
             if (has_qkv_bias) {
                 uint16_t bq_sram1 = S1_BIAS_Q + h * S * HEAD_DIM;
                 encode_instr(OP_VEC, 0x00, ADDR_Q_H, ADDR_Q_H, bq_sram1,
@@ -1011,6 +1016,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             }
 
             // Q 也需要做 RoPE，与 K 保持相同的相对位置编码体系。
+            //2 ucode
             encode_instr(OP_ROPE, 0, ADDR_Q_H, ADDR_Q_H, S1_ROPE_SIN,
                          S, HEAD_DIM, 0, S1_ROPE_COS, hi, lo);
             ucode_write(addr++, hi, lo);
@@ -1018,6 +1024,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
 
             // 计算 attention score：S = Q * K^T，结果是 [S, S]。
+            //2 ucode
             encode_instr(OP_GEMM, FLAG_TRANSPOSE_B | FLAG_REQUANT, ADDR_S, ADDR_Q_H, ADDR_K_H,
                          S, S, HEAD_DIM, GEMM_IMM_K16, hi, lo);
             ucode_write(addr++, hi, lo);
@@ -1025,6 +1032,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
 
             // 对每一行 score 做 causal softmax。
+            // S +1 num ucode
             for (int i = 0; i < S; i++) {
                 uint16_t src = ADDR_S + i * S;
                 uint16_t dst = ADDR_P + i * S;
@@ -1036,6 +1044,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
 
             // 计算 attention 输出：ATTN_h = P * V。
+            //2 ucode
             encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_ATTN_H, ADDR_P, ADDR_V_H,
                          S, HEAD_DIM, S, GEMM_IMM_K16, hi, lo);
             ucode_write(addr++, hi, lo);
@@ -1043,6 +1052,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
             ucode_write(addr++, hi, lo);
 
             // 把当前 head 的 [S, HEAD_DIM] 结果拷贝到大矩阵 ATTN 的对应列块中。
+            //2 ucode
             encode_instr(OP_VEC, FLAG_COPY2D, ADDR_ATTN + h * HEAD_DIM, ADDR_ATTN_H, 0,
                          S, HEAD_DIM, HEAD_DIM, HIDDEN, hi, lo);//dst addr and dst stride decide final dst_addr
             ucode_write(addr++, hi, lo);
@@ -1052,6 +1062,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     }
 
     // Attention 输出拼接完成后，做输出投影 Wo。
+    //2 ucode
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_WO_OUT, ADDR_ATTN, ADDR_WO,
                  S, HIDDEN, HIDDEN, GEMM_IMM_K64, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1059,6 +1070,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 第一次残差相加：X2 = WO_OUT + X。
+    // 2 ucode
     encode_instr(OP_VEC, 0x00, ADDR_X2, ADDR_WO_OUT, S1_RESID,
                  0, S * HIDDEN, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1066,6 +1078,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 把第一次残差结果搬到 SRAM1，供第二次残差复用。
+    //2 ucode
     encode_instr(OP_DMA_LOAD, 0, S1_RESID, ADDR_X2, 0,
                  0, S * HIDDEN, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1073,6 +1086,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 第二个 RMSNorm，仍逐行处理。
+    // S +1 ucode
     for (int i = 0; i < S; i++) {
         uint16_t src = ADDR_X2 + i * HIDDEN;
         uint16_t dst = ADDR_RMS2_OUT + i * HIDDEN;
@@ -1084,12 +1098,13 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // SwiGLU 的 gate / up 两个投影。
+    //gate = 2 ucode
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_GATE, ADDR_RMS2_OUT, ADDR_W_GATE,
                  S, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
     ucode_write(addr++, hi, lo);
     encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
-
+    //up -> 2 ucode
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_UP, ADDR_RMS2_OUT, ADDR_W_UP,
                  S, FFN_DIM, HIDDEN, GEMM_IMM_K64, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1097,6 +1112,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 对 gate 分支做 SiLU。
+    //2 ucode
     encode_instr(OP_SILU, 0, ADDR_FFN_GATE, ADDR_FFN_GATE, 0,
                  0, S * FFN_DIM, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1104,6 +1120,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 把 up 分支搬到 SRAM1，后续和 gate 分支做逐元素乘法。
+    //2 ucode
     encode_instr(OP_DMA_LOAD, 0, S1_FFN_UP, ADDR_FFN_UP, 0,
                  0, S * FFN_DIM, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1111,6 +1128,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // SwiGLU 的逐元素乘法：SiLU(gate) * up。
+    //2 ucode
     encode_instr(OP_VEC, FLAG_VEC_MUL, ADDR_FFN_GATE, ADDR_FFN_GATE, S1_FFN_UP,
                  0, S * FFN_DIM, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1118,6 +1136,7 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // FFN 下投影回 hidden 维。
+    //2 ucode
     encode_instr(OP_GEMM, FLAG_REQUANT, ADDR_FFN_DOWN, ADDR_FFN_GATE, ADDR_W_DOWN,
                  S, HIDDEN, FFN_DIM, GEMM_IMM_K128, hi, lo);
     ucode_write(addr++, hi, lo);
@@ -1125,12 +1144,13 @@ int gen_qwen_prefill_block_microcode(int S, int blk_idx, int ucode_addr) {
     ucode_write(addr++, hi, lo);
 
     // 第二次残差相加，得到 block 最终输出。
+    //2 ucode
     encode_instr(OP_VEC, 0x00, ADDR_X_OUT, ADDR_FFN_DOWN, S1_RESID,
                  0, S * HIDDEN, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
     encode_instr(OP_BARRIER, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
-
+    //1 ucode
     encode_instr(OP_END, 0, 0, 0, 0, 0, 0, 0, 0, hi, lo);
     ucode_write(addr++, hi, lo);
 
@@ -1214,6 +1234,7 @@ int gen_qwen_decode_block_microcode(int T, int blk_idx, int ucode_addr) {
         ucode_write(addr++, hi, lo);
 
         // 从硬件 KV cache 把当前可见长度内的 K 全部读回到 SRAM0 工作区。
+        // OP_KV_Read,给layer id,head,length,dimension;one ucode
         encode_instr(OP_KV_READ, 0x00, ADDR_QWEN_DEC_K_CACHE, 0, 0,
                      blk_idx, HEAD_DIM, T_len, kv_h, hi, lo);
         ucode_write(addr++, hi, lo);
@@ -1221,6 +1242,7 @@ int gen_qwen_decode_block_microcode(int T, int blk_idx, int ucode_addr) {
         ucode_write(addr++, hi, lo);
 
         // 再把当前可见长度内的 V 全部读回到 SRAM0 工作区。
+        //OP_KV_Read,给layer id,length,dimension;one ucode
         encode_instr(OP_KV_READ, 0x01, ADDR_QWEN_DEC_V_CACHE, 0, 0,
                      blk_idx, HEAD_DIM, T_len, kv_h, hi, lo);
         ucode_write(addr++, hi, lo);

@@ -343,7 +343,7 @@ module gemm_ctrl
                     if (idx_a >= 0 && idx_a < int'(k_eff) && i < int'(m_eff))
                         sa_a_col[i] = buf_a[i][idx_a[3:0]];//send sa for one column numbers
                     else
-                        sa_a_col[i] = '0;
+                        sa_a_col[i] = '0;//padding 0
                 end
                 for (int j = 0; j < ARRAY_N; j++) begin//j为列，对于从上到下的
                     automatic int idx_b = int'(stream_cnt) - j;
