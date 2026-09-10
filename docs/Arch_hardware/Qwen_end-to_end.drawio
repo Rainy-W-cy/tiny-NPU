@@ -1,0 +1,308 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.2.5 Chrome/138.0.7204.251 Electron/37.6.1 Safari/537.36" version="28.2.5">
+  <diagram name="Paper-style Architecture" id="0">
+    <mxGraphModel dx="3483" dy="1511" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="430" math="1" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="--LdoTeGKo9f3FnznXW5-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-1" target="--LdoTeGKo9f3FnznXW5-3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-1" value="&lt;div&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;&lt;b&gt;User&lt;/b&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;prompt/max_token/kv&amp;nbsp; cache&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="120" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-2" value="End to End" style="text;strokeColor=none;fillColor=none;html=1;fontSize=24;fontStyle=1;verticalAlign=middle;align=center;" parent="1" vertex="1">
+          <mxGeometry x="-280" y="40" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-3" target="--LdoTeGKo9f3FnznXW5-5" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="--LdoTeGKo9f3FnznXW5-3" target="--LdoTeGKo9f3FnznXW5-7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-17" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-3" target="--LdoTeGKo9f3FnznXW5-16" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-3" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Shell&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;run_qwen_demo.sh&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="250" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-5" target="--LdoTeGKo9f3FnznXW5-10" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-5" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Python download weights&lt;/span&gt;&lt;div&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;qwen_gen_weights_hf.py&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-260" y="430" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-7" target="--LdoTeGKo9f3FnznXW5-12" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="--LdoTeGKo9f3FnznXW5-7" target="--LdoTeGKo9f3FnznXW5-14" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-7" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Python Golden Stage&lt;/span&gt;&lt;div&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;qwen_infer_golden.py&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="430" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-23" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-10" target="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="-165" y="790" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-10" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;weights.bin&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-260" y="565" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-22" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-12" target="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-12" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;prompt_tokens.txt&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-20" y="565" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-21" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-14" target="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-14" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;golden_tokens/logits/text&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;/meta&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="190" y="565" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-54" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.75;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-16" target="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="595" y="720" />
+              <mxPoint x="223" y="720" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-16" value="&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;&lt;b&gt;Build&lt;/b&gt;&lt;/span&gt;&lt;/div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;CMake+Verilator&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="520" y="435" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-35" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-18" target="--LdoTeGKo9f3FnznXW5-26" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="175" y="880" />
+              <mxPoint x="295" y="880" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-36" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-18" target="--LdoTeGKo9f3FnznXW5-25" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="175" y="880" />
+              <mxPoint x="80" y="880" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-49" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;curved=0;exitX=0.995;exitY=0.895;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="280" y="820.0000000000005" as="sourcePoint" />
+            <mxPoint x="520" y="960" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="269" y="820" />
+              <mxPoint x="520" y="820" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-53" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-18" target="--LdoTeGKo9f3FnznXW5-24" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="175" y="880" />
+              <mxPoint x="-175" y="880" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-57" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-18" target="--LdoTeGKo9f3FnznXW5-56" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-18" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;C++ Host&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;tb_qwen_demo_infer.cpp&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="750" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-41" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-24" target="--LdoTeGKo9f3FnznXW5-31" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="-175" y="1160" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-24" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Gen ucode and Write in ucode_sram&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-270" y="960" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-40" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-25" target="--LdoTeGKo9f3FnznXW5-31" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="-5" y="1080" />
+              <mxPoint x="175" y="1080" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-25" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Load weight and parameter in sram0/1&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-30" y="960" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-39" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-26" target="--LdoTeGKo9f3FnznXW5-31" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="375" y="1080" />
+              <mxPoint x="175" y="1080" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-26" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Start_pluse/ucode_len&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="200" y="960" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-50" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-27" target="--LdoTeGKo9f3FnznXW5-31" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="520" y="1160" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-27" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Start_pluse/ucode_len&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="420" y="960" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-44" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-31" target="--LdoTeGKo9f3FnznXW5-43" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-55" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;curved=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-31" target="--LdoTeGKo9f3FnznXW5-18" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="1180" />
+              <mxPoint x="620" y="790" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-31" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;llama_block_top RTL&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="1120" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-48" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-43" target="--LdoTeGKo9f3FnznXW5-45" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-43" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Fetch/Decode/&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;Scoreboard/Engine&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="1260" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-45" target="--LdoTeGKo9f3FnznXW5-43" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-45" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Sram0/Sram1/Scratch/&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;ACC/KV Cache&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="1400" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-59" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-56" target="--LdoTeGKo9f3FnznXW5-58" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-56" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;npu_token.txt&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="720" y="960" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-61" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-58" target="--LdoTeGKo9f3FnznXW5-60" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-58" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;Python Text postprocess&lt;/span&gt;&lt;div&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;qwen_npu_postprocess.py&lt;/font&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="720" y="1100" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-60" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;npu_text.txt&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="720" y="1240" width="190" height="80" as="geometry" />
+        </mxCell>
+        <UserObject label="&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;层次&lt;/font&gt;&lt;/th&gt;&lt;th&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;当前主要文件&lt;/font&gt;&lt;/th&gt;&lt;th&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;负责&lt;/font&gt;&lt;/th&gt;&lt;th&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;备注&lt;/font&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;Shell&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;[run_qwen_demo.sh (line 34)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/run_qwen_demo.sh:34)&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;参数解析、阶段选择、调用 Python/CMake/NPU 程序&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不计算 Transformer&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;权重 Python&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;[qwen_gen_weights_hf.py (line 198)](/home/yian/codex-workspace/tiny-NPU/python/tools/qwen_gen_weights_hf.py:198)&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot;&gt;&lt;font face=&quot;Times New Roman&quot;&gt;下载、裁剪、量化、打包 &lt;/font&gt;&lt;code style=&quot;&quot; dir=&quot;ltr&quot;&gt;&lt;font face=&quot;Times New Roman&quot;&gt;weights.bin&lt;/font&gt;&lt;/code&gt;&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不驱动 RTL&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;Golden Python&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;[qwen_infer_golden.py (line 267)](/home/yian/codex-workspace/tiny-NPU/python/golden/qwen_infer_golden.py:267)&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;文本编码、软件推理、生成 golden 工件&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不向 DUT 写 SRAM&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;CMake/Verilator&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;&lt;code dir=&quot;ltr&quot;&gt;&lt;font face=&quot;Times New Roman&quot;&gt;CMakeLists.txt&lt;/font&gt;&lt;/code&gt; 与 Verilator&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;把 RTL 转成 C++ 模型并与 testbench 链接&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不决定推理算法&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;C++ Host&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;[tb_qwen_demo_infer.cpp (line 1766)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/tb_qwen_demo_infer.cpp:1766)&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;推理主循环、Embedding、权重装载、微码生成、DUT 驱动、DMA shim、argmax&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不是纯硬件模块&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;微码&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;C++ 中的 &lt;code dir=&quot;ltr&quot;&gt;&lt;font face=&quot;Times New Roman&quot;&gt;gen_*_microcode()&lt;/font&gt;&lt;/code&gt;&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;描述一次硬件程序的算子顺序、地址和 shape&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不保存完整模型权重&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;RTL Top&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;[llama_block_top.sv (line 9)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/llama_block_top.sv:9)&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;取指、译码、依赖控制、Engine 调度与 SRAM 仲裁&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不做 tokenizer 和文本处理&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;计算 Engine&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;&lt;code style=&quot;&quot; dir=&quot;ltr&quot;&gt;rtl/gemm/&lt;/code&gt;、&lt;code style=&quot;&quot; dir=&quot;ltr&quot;&gt;rtl/ops/&lt;/code&gt;&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;执行 GEMM、Softmax、RMSNorm、RoPE、Vector、SiLU 等&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不决定完整生成循环&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;片上存储&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;SRAM、Scratch、ACC、KV Cache&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;保存当前程序需要的权重、激活、中间值和历史 K/V&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不直接读取 &lt;code dir=&quot;ltr&quot;&gt;weights.bin&lt;/code&gt;&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;后处理 Python&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;code dir=&quot;ltr&quot;&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;qwen_npu_postprocess.py&lt;/font&gt;&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;将 NPU token ID 解码为文本&lt;/font&gt;&lt;/td&gt;&lt;td&gt;&lt;font style=&quot;font-size: 17px;&quot; face=&quot;Times New Roman&quot;&gt;不重新运行 NPU&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;" link="&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;层次&lt;/th&gt;&lt;th&gt;当前主要文件&lt;/th&gt;&lt;th&gt;负责&lt;/th&gt;&lt;th&gt;不负责&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;Shell&lt;/td&gt;&lt;td&gt;[run_qwen_demo.sh (line 34)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/run_qwen_demo.sh:34)&lt;/td&gt;&lt;td&gt;参数解析、阶段选择、调用 Python/CMake/NPU 程序&lt;/td&gt;&lt;td&gt;不计算 Transformer&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;权重 Python&lt;/td&gt;&lt;td&gt;[qwen_gen_weights_hf.py (line 198)](/home/yian/codex-workspace/tiny-NPU/python/tools/qwen_gen_weights_hf.py:198)&lt;/td&gt;&lt;td&gt;下载、裁剪、量化、打包 &lt;code dir=&quot;ltr&quot;&gt;weights.bin&lt;/code&gt;&lt;/td&gt;&lt;td&gt;不驱动 RTL&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Golden Python&lt;/td&gt;&lt;td&gt;[qwen_infer_golden.py (line 267)](/home/yian/codex-workspace/tiny-NPU/python/golden/qwen_infer_golden.py:267)&lt;/td&gt;&lt;td&gt;文本编码、软件推理、生成 golden 工件&lt;/td&gt;&lt;td&gt;不向 DUT 写 SRAM&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CMake/Verilator&lt;/td&gt;&lt;td&gt;&lt;code dir=&quot;ltr&quot;&gt;CMakeLists.txt&lt;/code&gt; 与 Verilator&lt;/td&gt;&lt;td&gt;把 RTL 转成 C++ 模型并与 testbench 链接&lt;/td&gt;&lt;td&gt;不决定推理算法&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;C++ Host&lt;/td&gt;&lt;td&gt;[tb_qwen_demo_infer.cpp (line 1766)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/tb_qwen_demo_infer.cpp:1766)&lt;/td&gt;&lt;td&gt;推理主循环、Embedding、权重装载、微码生成、DUT 驱动、DMA shim、argmax&lt;/td&gt;&lt;td&gt;不是纯硬件模块&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;微码&lt;/td&gt;&lt;td&gt;C++ 中的 &lt;code dir=&quot;ltr&quot;&gt;gen_*_microcode()&lt;/code&gt;&lt;/td&gt;&lt;td&gt;描述一次硬件程序的算子顺序、地址和 shape&lt;/td&gt;&lt;td&gt;不保存完整模型权重&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;RTL Top&lt;/td&gt;&lt;td&gt;[llama_block_top.sv (line 9)](/home/yian/codex-workspace/tiny-NPU/sim/verilator/llama_block_top.sv:9)&lt;/td&gt;&lt;td&gt;取指、译码、依赖控制、Engine 调度与 SRAM 仲裁&lt;/td&gt;&lt;td&gt;不做 tokenizer 和文本处理&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;计算 Engine&lt;/td&gt;&lt;td&gt;&lt;code dir=&quot;ltr&quot;&gt;rtl/gemm/&lt;/code&gt;、&lt;code dir=&quot;ltr&quot;&gt;rtl/ops/&lt;/code&gt;&lt;/td&gt;&lt;td&gt;执行 GEMM、Softmax、RMSNorm、RoPE、Vector、SiLU 等&lt;/td&gt;&lt;td&gt;不决定完整生成循环&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;片上存储&lt;/td&gt;&lt;td&gt;SRAM、Scratch、ACC、KV Cache&lt;/td&gt;&lt;td&gt;保存当前程序需要的权重、激活、中间值和历史 K/V&lt;/td&gt;&lt;td&gt;不直接读取 &lt;code dir=&quot;ltr&quot;&gt;weights.bin&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;后处理 Python&lt;/td&gt;&lt;td&gt;&lt;code dir=&quot;ltr&quot;&gt;qwen_npu_postprocess.py&lt;/code&gt;&lt;/td&gt;&lt;td&gt;将 NPU token ID 解码为文本&lt;/td&gt;&lt;td&gt;不重新运行 NPU&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;" id="--LdoTeGKo9f3FnznXW5-63">
+          <mxCell style="text;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+            <mxGeometry x="1040" y="65" width="1240" height="450" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-68" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;C++ Host&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;font-size: 17px;&quot;&gt;tb_qwen_demo_infer.cpp&lt;/span&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1070" y="785" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-69" value="" style="shape=curlyBracket;whiteSpace=wrap;html=1;rounded=1;labelPosition=left;verticalLabelPosition=middle;align=right;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="1270" y="645" width="20" height="400" as="geometry" />
+        </mxCell>
+        <UserObject label="读取 weights.bin&#xa;读取 prompt_tokens.txt&#xa;创建并复位 DUT&#xa;进行 Embedding 查表&#xa;按层Load权重和激活&#xa;生成本层微码&#xa;写入微码 SRAM&#xa;设置 ucode_len&#xa;发出 start_pulse&#xa;逐拍推进 Verilator 模型&#xa;处理 DMA shim&#xa;等待 program_end&#xa;读回结果&#xa;执行 final RMSNorm 和 LM Head&#xa;读取 logits&#xa;选择下一 token&#xa;把 token 回送到序列" link="读取 weights.bin&#xa;读取 prompt_tokens.txt&#xa;创建并复位 DUT&#xa;进行 Embedding 查表&#xa;按层装载权重和激活&#xa;生成本层微码&#xa;写入微码 SRAM&#xa;设置 ucode_len&#xa;发出 start_pulse&#xa;逐拍推进 Verilator 模型&#xa;处理 DMA shim&#xa;等待 program_end&#xa;读回结果&#xa;执行 final RMSNorm 和 LM Head&#xa;读取 logits&#xa;选择下一 token&#xa;把 token 回灌到序列" id="--LdoTeGKo9f3FnznXW5-71">
+          <mxCell style="text;whiteSpace=wrap;fontSize=18;" parent="1" vertex="1">
+            <mxGeometry x="1310" y="645" width="320" height="415" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-77" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-73" target="--LdoTeGKo9f3FnznXW5-75" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-73" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="610" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-74" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Shell 启动C++ Host&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="635" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-80" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-75" target="--LdoTeGKo9f3FnznXW5-78" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-75" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="730" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-76" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;C++生成并写入ucode&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="755" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-83" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-78" target="--LdoTeGKo9f3FnznXW5-81" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-78" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="850" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-79" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;start_pulse启动Fetch&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="875" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-86" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-81" target="--LdoTeGKo9f3FnznXW5-84" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-81" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="970" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-82" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Fetch读取ucode_sram&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="995" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-89" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="--LdoTeGKo9f3FnznXW5-84" target="--LdoTeGKo9f3FnznXW5-87" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-84" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1090" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-85" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Decode译码并选择Engine&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1115" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-92" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-87" target="--LdoTeGKo9f3FnznXW5-90" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-87" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1210" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-88" value="&lt;span style=&quot;font-size: 16px;&quot;&gt;Scoreboard判断can_issue&lt;/span&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2013.75" y="1235" width="192.5" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-95" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-90" target="--LdoTeGKo9f3FnznXW5-93" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-90" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1330" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-91" value="&lt;span style=&quot;font-size: 16px;&quot;&gt;Engine执行并返回done&lt;/span&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2023.75" y="1355" width="172.5" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-98" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-93" target="--LdoTeGKo9f3FnznXW5-96" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-93" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1450" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-94" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Scoreboard清除busy&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="1475" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-101" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="--LdoTeGKo9f3FnznXW5-96" target="--LdoTeGKo9f3FnznXW5-99" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-96" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1570" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-97" value="&lt;span style=&quot;font-size: 16px;&quot;&gt;Fetch 结束且完全Engine空闲&lt;/span&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2027.5" y="1595" width="165" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-99" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1690" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-100" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;program_end通知C++ Host&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2010" y="1715" width="202.5" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="--LdoTeGKo9f3FnznXW5-102" value="执行流程" style="text;strokeColor=none;fillColor=none;html=1;fontSize=24;fontStyle=1;verticalAlign=middle;align=center;" parent="1" vertex="1">
+          <mxGeometry x="1860" y="585" width="100" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

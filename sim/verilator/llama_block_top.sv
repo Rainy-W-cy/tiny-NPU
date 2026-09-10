@@ -538,7 +538,7 @@ module llama_block_top
     // ================================================================
     localparam int KV_MAX_LAYERS = 4;
     localparam int KV_MAX_HEADS  = 4;
-    localparam int KV_MAX_SEQ    = 512;
+    localparam int KV_MAX_SEQ    = 16;
     localparam int KV_HEAD_DIM   = 16;
     localparam int KV_VEC_W      = KV_HEAD_DIM * 8;
 
